@@ -3,7 +3,4 @@ uvicorn
 python-multipart
 pandas
 openpyxl
-pydub
 rapidfuzz
-openai-whisper
-torch
