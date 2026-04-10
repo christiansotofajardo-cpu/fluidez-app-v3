@@ -53,7 +53,7 @@ def normalize_text(s: str) -> str:
     return s
 
 
-def tokenize(s: str) -> list[str]:
+def tokenize(s: str):
     return normalize_text(s).split()
 
 
@@ -532,11 +532,4 @@ async def upload(file: UploadFile = File(...)):
         <p><a href="/">Volver</a></p>
     </body>
     </html>
-    ```
-    
-Luego:
-1. guarda con **Commit changes**
-2. vuelve a Render
-3. debería redeployar solo
-
-Cuando termine, sube de nuevo un audio y me dices qué te mostró.
+    """
