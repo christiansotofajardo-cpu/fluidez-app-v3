@@ -1,9 +1,8 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
-pandas
-openpyxl
-rapidfuzz
+numpy
 librosa
 soundfile
-numpy
+faster-whisper
+rapidfuzz
