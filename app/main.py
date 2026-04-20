@@ -1,24 +1,123 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from pathlib import Path
-import shutil
 import html
 import os
+import re
 import uuid
+import unicodedata
+from typing import Any
 
 import numpy as np
 import soundfile as sf
 import librosa
+
+from faster_whisper import WhisperModel
+from rapidfuzz import fuzz
+
 
 app = FastAPI(title="Fluidez - ComunicaLab")
 
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-# Para una primera versión estable en Render:
 ALLOWED_EXTENSIONS = {".wav"}
-MAX_FILE_SIZE_MB = 15
-MAX_AUDIO_SECONDS = 180
+MAX_FILE_SIZE_MB = 20
+MAX_AUDIO_SECONDS = 240
+
+# =========================
+# TEXTOS DE REFERENCIA
+# =========================
+
+TEXTOS_REFERENCIA = {
+    "2A": """
+El duende vivía en el fondo de un bosque muy antiguo.
+Todas las mañanas salía a caminar entre los árboles,
+escuchando los sonidos de los pájaros y del viento.
+Le gustaba observar cómo la luz del sol cambiaba
+a lo largo del día, iluminando distintos rincones del lugar.
+Un día encontró una pequeña puerta escondida en un tronco.
+Al abrirla, descubrió un pasaje secreto que nunca antes había visto.
+Desde ese momento, decidió explorar cada rincón del bosque,
+sabiendo que siempre podía encontrar algo nuevo.
+""".strip(),
+    "2B": """
+La hormiga trabajaba sin detenerse durante todo el día.
+Desde muy temprano comenzaba a recoger pequeñas hojas
+y trozos de comida que encontraba en el camino.
+Caminaba largas distancias para llevar todo a su hogar,
+donde otras hormigas la esperaban.
+Aunque el camino era difícil, nunca se rendía.
+Sabía que su esfuerzo era importante para el grupo.
+Con el tiempo, lograron reunir suficiente alimento
+para enfrentar los días en que no podrían salir.
+""".strip(),
+}
+
+DECOD_REFERENCIA = {
+    "2A": [
+        {"item": 1, "texto": "indignado", "tipo": "real"},
+        {"item": 2, "texto": "cobujango", "tipo": "pseudo"},
+        {"item": 3, "texto": "grabadora", "tipo": "real"},
+        {"item": 4, "texto": "indestructible", "tipo": "real"},
+        {"item": 5, "texto": "prectun", "tipo": "pseudo"},
+        {"item": 6, "texto": "intercambiar", "tipo": "real"},
+        {"item": 7, "texto": "asderminotar", "tipo": "pseudo"},
+        {"item": 8, "texto": "inventor", "tipo": "real"},
+        {"item": 9, "texto": "flesujas", "tipo": "pseudo"},
+        {"item": 10, "texto": "pantelirdo", "tipo": "pseudo"},
+        {"item": 11, "texto": "independencia", "tipo": "real"},
+        {"item": 12, "texto": "gracioso", "tipo": "real"},
+        {"item": 13, "texto": "tosperantago", "tipo": "pseudo"},
+        {"item": 14, "texto": "lornifaru", "tipo": "pseudo"},
+        {"item": 15, "texto": "actuar", "tipo": "real"},
+        {"item": 16, "texto": "resajes", "tipo": "pseudo"},
+    ],
+    "2B": [
+        {"item": 1, "texto": "adorable", "tipo": "real"},
+        {"item": 2, "texto": "olpictaver", "tipo": "pseudo"},
+        {"item": 3, "texto": "publicidad", "tipo": "real"},
+        {"item": 4, "texto": "internacional", "tipo": "real"},
+        {"item": 5, "texto": "placter", "tipo": "pseudo"},
+        {"item": 6, "texto": "diferenciar", "tipo": "real"},
+        {"item": 7, "texto": "turotenacer", "tipo": "pseudo"},
+        {"item": 8, "texto": "columna", "tipo": "real"},
+        {"item": 9, "texto": "rintumos", "tipo": "pseudo"},
+        {"item": 10, "texto": "trolastaña", "tipo": "pseudo"},
+        {"item": 11, "texto": "intranquilidad", "tipo": "real"},
+        {"item": 12, "texto": "valiente", "tipo": "real"},
+        {"item": 13, "texto": "custorguljera", "tipo": "pseudo"},
+        {"item": 14, "texto": "mucapisa", "tipo": "pseudo"},
+        {"item": 15, "texto": "trepar", "tipo": "real"},
+        {"item": 16, "texto": "taloncer", "tipo": "pseudo"},
+    ],
+}
+
+# =========================
+# MODELO DE TRANSCRIPCIÓN
+# =========================
+
+WHISPER_MODEL_NAME = "small"
+_whisper_model: WhisperModel | None = None
+
+
+def get_whisper_model() -> WhisperModel:
+    global _whisper_model
+    if _whisper_model is None:
+        _whisper_model = WhisperModel(
+            WHISPER_MODEL_NAME,
+            device="cpu",
+            compute_type="int8",
+        )
+    return _whisper_model
+
+
+# =========================
+# UTILIDADES
+# =========================
+
+def clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
+    return max(lo, min(hi, x))
 
 
 def validar_extension(filename: str):
@@ -26,7 +125,7 @@ def validar_extension(filename: str):
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Extensión no permitida: {ext}. Por ahora usa solo archivos .wav",
+            detail=f"Extensión no permitida: {ext}. Usa solo archivos .wav",
         )
 
 
@@ -41,138 +140,34 @@ async def guardar_upload(upload: UploadFile, destino: Path):
             if size > MAX_FILE_SIZE_MB * 1024 * 1024:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"El archivo {upload.filename} supera el máximo de {MAX_FILE_SIZE_MB} MB."
+                    detail=f"El archivo {upload.filename} supera el máximo de {MAX_FILE_SIZE_MB} MB.",
                 )
             buffer.write(chunk)
     await upload.close()
 
 
-def clasificar(valor: float | None):
-    if valor is None:
-        return None
-    if valor >= 0.75:
-        return "ALTO"
-    if valor >= 0.40:
-        return "MEDIO"
-    return "BAJO"
+def normalizar_texto(texto: str) -> str:
+    texto = texto.lower().strip()
+    texto = unicodedata.normalize("NFD", texto)
+    texto = "".join(ch for ch in texto if unicodedata.category(ch) != "Mn")
+    texto = re.sub(r"[^a-zñ0-9\s]", " ", texto)
+    texto = re.sub(r"\s+", " ", texto).strip()
+    return texto
 
 
-def perfil_integrado(nf: str | None, nd: str | None):
-    if nf and nd:
-        return f"Fluidez {nf} - Decodificación {nd}"
-    if nf:
-        return f"Solo Fluidez {nf}"
-    if nd:
-        return f"Solo Decodificación {nd}"
-    return "Sin datos"
+def tokenizar(texto: str) -> list[str]:
+    txt = normalizar_texto(texto)
+    return txt.split() if txt else []
 
 
-def tipo_problema(nf: str | None, nd: str | None):
-    if nf == "BAJO" and nd == "BAJO":
-        return "Dificultad mixta"
-    if nf == "BAJO":
-        return "Dificultad predominante en fluidez"
-    if nd == "BAJO":
-        return "Dificultad predominante en decodificación"
-    return "Sin dificultades relevantes"
-
-
-def estado_lectura(nf: str | None, nd: str | None):
-    if nf == "ALTO" and nd == "ALTO":
-        return "Consolidado"
-    if nf == "BAJO" and nd == "BAJO":
-        return "Descendido"
-    if nf == "MEDIO" or nd == "MEDIO":
-        return "En desarrollo"
-    if nf == "BAJO" or nd == "BAJO":
-        return "En riesgo"
-    return "Indeterminado"
-
-
-def interpretar_resultado(nf: str | None, nd: str | None):
-    if nf == "BAJO" and nd == "BAJO":
-        return "Se observan dificultades tanto en la precisión para reconocer palabras como en la fluidez de la lectura."
-    if nf == "BAJO" and nd in {"MEDIO", "ALTO"}:
-        return "La precisión lectora aparece relativamente preservada, pero la lectura todavía se realiza con lentitud o con poca continuidad."
-    if nd == "BAJO" and nf in {"MEDIO", "ALTO"}:
-        return "La lectura presenta dificultades en el reconocimiento preciso de palabras, lo que puede afectar el rendimiento lector general."
-    if nf == "MEDIO" or nd == "MEDIO":
-        return "El desempeño lector se encuentra en una zona intermedia y todavía conviene reforzar algunos componentes."
-    if nf == "ALTO" and nd == "ALTO":
-        return "El desempeño lector aparece bien consolidado tanto en fluidez como en decodificación."
-    return "No fue posible generar una interpretación precisa."
-
-
-def sugerencia_pedagogica(nf: str | None, nd: str | None):
-    if nf == "BAJO" and nd == "BAJO":
-        return "Se recomienda práctica guiada frecuente, con apoyo en reconocimiento de palabras y lectura oral breve."
-    if nf == "BAJO":
-        return "Se recomienda reforzar lectura en voz alta con acompañamiento."
-    if nd == "BAJO":
-        return "Se recomienda trabajar reconocimiento preciso de palabras, lectura de sílabas y correspondencias grafema-sonido."
-    if nf == "MEDIO" or nd == "MEDIO":
-        return "Se recomienda continuar con práctica lectora regular y seguimiento."
-    if nf == "ALTO" and nd == "ALTO":
-        return "Se sugiere mantener la práctica lectora y avanzar hacia textos más complejos."
-    return "Sin sugerencia específica."
-
-
-def conclusion_principal(nf: str | None, nd: str | None):
-    if nf == "ALTO" and nd == "ALTO":
-        return "Lectura fluida y precisa para su nivel"
-    if nf == "BAJO" and nd == "BAJO":
-        return "Se observan dificultades importantes en la lectura"
-    if nf == "BAJO":
-        return "Se observa una dificultad principal en la fluidez lectora"
-    if nd == "BAJO":
-        return "Se observa una dificultad principal en la precisión lectora"
-    return "La lectura se encuentra en proceso de consolidación"
-
-
-def descripcion_fluidez(nivel: str | None):
-    if nivel == "ALTO":
-        return "La lectura oral muestra buen ritmo, continuidad y seguridad."
-    if nivel == "MEDIO":
-        return "La lectura oral se encuentra en desarrollo y todavía puede ganar continuidad."
-    if nivel == "BAJO":
-        return "La lectura oral presenta lentitud, pausas excesivas o poca continuidad."
-    return "Sin información suficiente."
-
-
-def descripcion_decodificacion(nivel: str | None):
-    if nivel == "ALTO":
-        return "El reconocimiento de palabras aparece preciso y estable."
-    if nivel == "MEDIO":
-        return "El reconocimiento de palabras está en desarrollo."
-    if nivel == "BAJO":
-        return "Se observan debilidades en el reconocimiento preciso de palabras."
-    return "Sin información suficiente."
-
-
-def fortalezas_alertas(nf: str | None, nd: str | None):
-    fortalezas = []
-    alertas = []
-
-    if nf == "ALTO":
-        fortalezas.append("Buena continuidad y ritmo de lectura.")
-    elif nf == "MEDIO":
-        alertas.append("La fluidez todavía requiere consolidación.")
-    elif nf == "BAJO":
-        alertas.append("La fluidez lectora aparece descendida.")
-
-    if nd == "ALTO":
-        fortalezas.append("Reconocimiento preciso de palabras.")
-    elif nd == "MEDIO":
-        alertas.append("La decodificación se encuentra en desarrollo.")
-    elif nd == "BAJO":
-        alertas.append("La precisión en la lectura de palabras requiere apoyo.")
-
-    if not fortalezas:
-        fortalezas.append("Se recomienda seguir observando progresos a medida que avance la práctica lectora.")
-    if not alertas:
-        alertas.append("No se detectan alertas relevantes en esta evaluación.")
-
-    return fortalezas, alertas
+def contar_repeticiones_adjacentes(tokens: list[str]) -> int:
+    if not tokens:
+        return 0
+    rep = 0
+    for i in range(1, len(tokens)):
+        if tokens[i] == tokens[i - 1]:
+            rep += 1
+    return rep
 
 
 def badge_color(nivel: str | None):
@@ -183,64 +178,6 @@ def badge_color(nivel: str | None):
     if nivel == "BAJO":
         return "#fee2e2"
     return "#e5e7eb"
-
-
-def estado_color(estado: str):
-    e = estado.lower()
-    if e == "consolidado":
-        return "#065f46"
-    if e == "en desarrollo":
-        return "#92400e"
-    if e == "en riesgo":
-        return "#9a3412"
-    if e == "descendido":
-        return "#991b1b"
-    return "#374151"
-
-
-def analizar_audio(path: Path):
-    try:
-        y, sr = sf.read(str(path), always_2d=False)
-        if y.ndim > 1:
-            y = np.mean(y, axis=1)
-        y = y.astype(np.float32, copy=False)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"No se pudo leer el audio WAV: {path.name}. Error: {str(e)}")
-
-    if y.size == 0:
-        return {"duracion": 0.0, "energia": 0.0, "silencio": 1.0, "zcr": 0.0}
-
-    duracion = float(len(y) / sr)
-    if duracion > MAX_AUDIO_SECONDS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"El audio {path.name} dura {round(duracion,1)} s. Máximo permitido: {MAX_AUDIO_SECONDS} s."
-        )
-
-    max_abs = np.max(np.abs(y))
-    if max_abs > 0:
-        y = y / max_abs
-
-    energia = float(np.mean(np.abs(y)))
-    silencio = float(np.mean(np.abs(y) < 0.01))
-    zcr = float(np.mean(librosa.feature.zero_crossing_rate(y=y, frame_length=2048, hop_length=512)))
-
-    return {
-        "duracion": duracion,
-        "energia": energia,
-        "silencio": silencio,
-        "zcr": zcr,
-    }
-
-
-def calcular_indice_fluidez(metricas: dict):
-    score = 1.0 - (metricas["duracion"] * 0.05 + metricas["silencio"] * 0.8)
-    return round(max(0.0, min(1.0, score)), 2)
-
-
-def calcular_indice_decodificacion(metricas: dict):
-    score = (metricas["energia"] * 8.0) + (metricas["zcr"] * 2.0) - (metricas["silencio"] * 0.5)
-    return round(max(0.0, min(1.0, score)), 2)
 
 
 def render_error(message: str):
@@ -295,6 +232,375 @@ def render_error(message: str):
     )
 
 
+# =========================
+# ANÁLISIS ACÚSTICO / TEMPORAL
+# =========================
+
+def corridas_booleanas(arr_bool: np.ndarray):
+    if len(arr_bool) == 0:
+        return [], []
+
+    true_runs = []
+    false_runs = []
+
+    actual_val = arr_bool[0]
+    largo = 1
+
+    for v in arr_bool[1:]:
+        if v == actual_val:
+            largo += 1
+        else:
+            if actual_val:
+                true_runs.append(largo)
+            else:
+                false_runs.append(largo)
+            actual_val = v
+            largo = 1
+
+    if actual_val:
+        true_runs.append(largo)
+    else:
+        false_runs.append(largo)
+
+    return true_runs, false_runs
+
+
+def analizar_audio_temporal(path_audio: Path) -> dict[str, float]:
+    y, sr = sf.read(str(path_audio), always_2d=False)
+
+    if isinstance(y, np.ndarray) and y.ndim > 1:
+        y = np.mean(y, axis=1)
+
+    y = np.asarray(y, dtype=np.float32)
+
+    if y.size == 0:
+        return {
+            "duracion_s": 0.0,
+            "speech_ratio": 0.0,
+            "pausas_n": 0,
+            "pausas_largas_ratio": 1.0,
+            "voz_segmentos_n": 0,
+            "voz_segmento_medio_s": 0.0,
+            "pausa_media_s": 0.0,
+            "pausas_por_min": 0.0,
+            "rms_media": 0.0,
+            "rms_sd": 0.0,
+            "zcr_media": 0.0,
+            "zcr_sd": 0.0,
+            "energia_media_abs": 0.0,
+            "tempo_aprox": 0.0,
+        }
+
+    duracion_s = len(y) / sr
+    if duracion_s > MAX_AUDIO_SECONDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"El audio dura {round(duracion_s,1)} s. Máximo permitido: {MAX_AUDIO_SECONDS} s.",
+        )
+
+    max_abs = np.max(np.abs(y))
+    if max_abs > 0:
+        y = y / max_abs
+
+    frame_length = 2048
+    hop_length = 512
+    frame_s = hop_length / sr
+
+    rms = librosa.feature.rms(
+        y=y,
+        frame_length=frame_length,
+        hop_length=hop_length,
+    )[0]
+
+    zcr = librosa.feature.zero_crossing_rate(
+        y=y,
+        frame_length=frame_length,
+        hop_length=hop_length,
+    )[0]
+
+    rms_media = float(np.mean(rms)) if len(rms) else 0.0
+    rms_sd = float(np.std(rms)) if len(rms) else 0.0
+    zcr_media = float(np.mean(zcr)) if len(zcr) else 0.0
+    zcr_sd = float(np.std(zcr)) if len(zcr) else 0.0
+    energia_media_abs = float(np.mean(np.abs(y)))
+
+    thr = max(0.02, float(np.mean(rms) * 0.6)) if len(rms) else 0.02
+    voiced = rms > thr if len(rms) else np.array([], dtype=bool)
+
+    speech_ratio = float(np.mean(voiced)) if len(voiced) else 0.0
+    voz_runs, pausa_runs = corridas_booleanas(voiced)
+
+    voz_segmentos_n = len(voz_runs)
+    voz_segmento_medio_s = float(np.mean(voz_runs) * frame_s) if voz_runs else 0.0
+
+    pausas_n = len(pausa_runs)
+    pausa_media_s = float(np.mean(pausa_runs) * frame_s) if pausa_runs else 0.0
+
+    min_pausa_larga_s = 0.35
+    min_pausa_larga_frames = max(1, int(min_pausa_larga_s / frame_s))
+    pausas_largas = [p for p in pausa_runs if p >= min_pausa_larga_frames]
+    pausas_largas_ratio = float(len(pausas_largas) / len(pausa_runs)) if pausa_runs else 0.0
+
+    pausas_por_min = float(pausas_n / (duracion_s / 60.0)) if duracion_s > 0 else 0.0
+
+    try:
+        onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+        tempo_aprox = float(librosa.feature.tempo(onset_envelope=onset_env, sr=sr)[0])
+    except Exception:
+        tempo_aprox = 0.0
+
+    return {
+        "duracion_s": float(duracion_s),
+        "speech_ratio": speech_ratio,
+        "pausas_n": int(pausas_n),
+        "pausas_largas_ratio": pausas_largas_ratio,
+        "voz_segmentos_n": int(voz_segmentos_n),
+        "voz_segmento_medio_s": voz_segmento_medio_s,
+        "pausa_media_s": pausa_media_s,
+        "pausas_por_min": pausas_por_min,
+        "rms_media": rms_media,
+        "rms_sd": rms_sd,
+        "zcr_media": zcr_media,
+        "zcr_sd": zcr_sd,
+        "energia_media_abs": energia_media_abs,
+        "tempo_aprox": tempo_aprox,
+    }
+
+
+def puntaje_temporal_fluidez(metricas: dict[str, float]) -> float:
+    return round(
+        clamp(
+            0.40 * metricas["speech_ratio"]
+            + 0.25 * clamp(metricas["voz_segmento_medio_s"] / 1.2)
+            + 0.20 * (1.0 - clamp(metricas["pausa_media_s"] / 1.2))
+            + 0.15 * (1.0 - metricas["pausas_largas_ratio"])
+        ),
+        4,
+    )
+
+
+# =========================
+# TRANSCRIPCIÓN
+# =========================
+
+def transcribir_audio(path_audio: Path) -> str:
+    model = get_whisper_model()
+    segments, info = model.transcribe(
+        str(path_audio),
+        language="es",
+        beam_size=5,
+        vad_filter=True,
+    )
+    texto = " ".join(seg.text for seg in segments).strip()
+    return texto
+
+
+# =========================
+# FLUIDEZ LINGÜÍSTICA
+# =========================
+
+def lcs_len(a: list[str], b: list[str]) -> int:
+    if not a or not b:
+        return 0
+    m, n = len(a), len(b)
+    dp = [0] * (n + 1)
+    for i in range(1, m + 1):
+        prev = 0
+        for j in range(1, n + 1):
+            temp = dp[j]
+            if a[i - 1] == b[j - 1]:
+                dp[j] = prev + 1
+            else:
+                dp[j] = max(dp[j], dp[j - 1])
+            prev = temp
+    return dp[n]
+
+
+def analizar_fluidez_linguistica(forma: str, transcripcion: str) -> dict[str, Any]:
+    esperado = TEXTOS_REFERENCIA[forma]
+    exp_tokens = tokenizar(esperado)
+    tr_tokens = tokenizar(transcripcion)
+
+    if not exp_tokens:
+        raise HTTPException(status_code=500, detail=f"No hay texto de referencia para la forma {forma}")
+
+    lcs = lcs_len(exp_tokens, tr_tokens)
+    cobertura = lcs / len(exp_tokens) if exp_tokens else 0.0
+    precision = lcs / len(tr_tokens) if tr_tokens else 0.0
+    omisiones = max(0, len(exp_tokens) - lcs)
+    exceso = max(0, len(tr_tokens) - lcs)
+    rep_adj = contar_repeticiones_adjacentes(tr_tokens)
+    rep_ratio = rep_adj / max(len(tr_tokens), 1)
+
+    score = clamp(
+        0.45 * cobertura
+        + 0.35 * precision
+        + 0.10 * (1.0 - clamp(rep_ratio * 3.0))
+        + 0.10 * (1.0 - clamp(exceso / max(len(exp_tokens), 1)))
+    )
+
+    return {
+        "texto_esperado": esperado,
+        "tokens_esperados": len(exp_tokens),
+        "tokens_transcritos": len(tr_tokens),
+        "lcs": lcs,
+        "cobertura": round(cobertura, 4),
+        "precision_ajuste": round(precision, 4),
+        "omisiones_aprox": omisiones,
+        "exceso_aprox": exceso,
+        "repeticiones_adjacentes": rep_adj,
+        "score_linguistico": round(score, 4),
+    }
+
+
+def clasificar_nivel(score: float) -> str:
+    if score >= 0.72:
+        return "ALTO"
+    if score >= 0.48:
+        return "MEDIO"
+    return "BAJO"
+
+
+# =========================
+# DECODIFICACIÓN
+# =========================
+
+def alinear_decod(expected_items: list[dict[str, Any]], transcripcion: str) -> dict[str, Any]:
+    spoken = tokenizar(transcripcion)
+
+    resultados = []
+    i = 0
+
+    for item in expected_items:
+        esperado = normalizar_texto(item["texto"]).replace(" ", "")
+
+        if i >= len(spoken):
+            resultados.append({
+                "item": item["item"],
+                "esperado": item["texto"],
+                "tipo": item["tipo"],
+                "producido": "",
+                "score": 0,
+                "correcto": False,
+            })
+            continue
+
+        cand1 = spoken[i] if i < len(spoken) else ""
+        cand2 = (spoken[i] + spoken[i + 1]) if i + 1 < len(spoken) else ""
+
+        s1 = fuzz.ratio(esperado, cand1)
+        s2 = fuzz.ratio(esperado, cand2) if cand2 else -1
+
+        if s2 > s1:
+            producido = cand2
+            score = s2
+            i += 2
+        else:
+            producido = cand1
+            score = s1
+            i += 1
+
+        correcto = score >= 85
+
+        resultados.append({
+            "item": item["item"],
+            "esperado": item["texto"],
+            "tipo": item["tipo"],
+            "producido": producido,
+            "score": int(score),
+            "correcto": bool(correcto),
+        })
+
+    total = len(resultados)
+    correctos = sum(1 for r in resultados if r["correcto"])
+
+    reales = [r for r in resultados if r["tipo"] == "real"]
+    pseudos = [r for r in resultados if r["tipo"] == "pseudo"]
+
+    correctos_reales = sum(1 for r in reales if r["correcto"])
+    correctos_pseudos = sum(1 for r in pseudos if r["correcto"])
+
+    acc_total = correctos / total if total else 0.0
+    acc_reales = correctos_reales / len(reales) if reales else 0.0
+    acc_pseudos = correctos_pseudos / len(pseudos) if pseudos else 0.0
+
+    # Damos un poco más de peso a pseudopalabras
+    score_decod = clamp(0.40 * acc_reales + 0.60 * acc_pseudos)
+
+    return {
+        "resultados": resultados,
+        "total_items": total,
+        "correctos_total": correctos,
+        "acc_total": round(acc_total, 4),
+        "acc_reales": round(acc_reales, 4),
+        "acc_pseudos": round(acc_pseudos, 4),
+        "score_decod": round(score_decod, 4),
+    }
+
+
+# =========================
+# INTERPRETACIÓN
+# =========================
+
+def conclusion_fluidez(nivel: str) -> str:
+    if nivel == "ALTO":
+        return "Se observa una lectura continua, con buen ajuste temporal y lingüístico."
+    if nivel == "MEDIO":
+        return "La lectura muestra un desempeño intermedio, con continuidad parcial y margen de mejora."
+    return "Se observan dificultades de continuidad y/o ajuste lingüístico en la lectura."
+
+def conclusion_decod(nivel: str) -> str:
+    if nivel == "ALTO":
+        return "La decodificación aparece bien lograda en este tamizaje."
+    if nivel == "MEDIO":
+        return "La decodificación se ubica en una zona intermedia."
+    return "La decodificación muestra debilidades relevantes en este tamizaje."
+
+def fortalezas_fluidez(score_temp: float, score_ling: float) -> list[str]:
+    out = []
+    if score_temp >= 0.72:
+        out.append("Buen manejo temporal: pausas y continuidad relativamente adecuadas.")
+    if score_ling >= 0.72:
+        out.append("Buen ajuste al contenido lingüístico del texto esperado.")
+    if not out:
+        out.append("Se aprecia margen para consolidar la lectura con mayor apoyo.")
+    return out
+
+def alertas_fluidez(score_temp: float, score_ling: float) -> list[str]:
+    out = []
+    if score_temp < 0.48:
+        out.append("El patrón temporal muestra pausas frecuentes, segmentos cortos o baja continuidad.")
+    if score_ling < 0.48:
+        out.append("La transcripción se aleja del texto esperado, sugiriendo omisiones, desajustes o quiebres.")
+    if not out:
+        out.append("No se observan alertas importantes en esta lectura.")
+    return out
+
+def fortalezas_decod(acc_reales: float, acc_pseudos: float) -> list[str]:
+    out = []
+    if acc_reales >= 0.72:
+        out.append("Buen reconocimiento de palabras reales.")
+    if acc_pseudos >= 0.72:
+        out.append("Buen desempeño en pseudopalabras.")
+    if not out:
+        out.append("Hay puntos de apoyo, pero todavía conviene afinar esta dimensión.")
+    return out
+
+def alertas_decod(acc_reales: float, acc_pseudos: float) -> list[str]:
+    out = []
+    if acc_reales < 0.48:
+        out.append("Bajo rendimiento en palabras reales.")
+    if acc_pseudos < 0.48:
+        out.append("Bajo rendimiento en pseudopalabras.")
+    if not out:
+        out.append("No se observan alertas importantes en esta tarea.")
+    return out
+
+
+# =========================
+# HOME
+# =========================
+
 @app.get("/", response_class=HTMLResponse)
 @app.head("/", response_class=HTMLResponse)
 def home():
@@ -307,7 +613,7 @@ def home():
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 960px;
+            max-width: 980px;
             margin: 40px auto;
             padding: 20px;
             line-height: 1.5;
@@ -398,9 +704,11 @@ def home():
         <p>Sube un audio de fluidez y uno de decodificación para obtener una evaluación lectora integrada.</p>
 
         <div class="demo">
-            Esta versión realiza un análisis acústico básico del audio para estimar preliminarmente fluidez y decodificación.
+            Esta versión usa un análisis híbrido:
+            <strong>temporal + lingüístico</strong> para fluidez, y
+            <strong>comparación con lista esperada</strong> para decodificación.
             <br><br>
-            Formato admitido en esta versión estable: <strong>.wav</strong>
+            Formato admitido en esta versión: <strong>.wav</strong>
         </div>
 
         <form action="/evaluar" method="post" enctype="multipart/form-data">
@@ -422,7 +730,7 @@ def home():
             <button type="submit">Evaluar</button>
         </form>
 
-        <p class="small">Máximo por archivo: 15 MB. Duración máxima: 180 segundos.</p>
+        <p class="small">Máximo por archivo: 20 MB. Duración máxima por audio: 240 segundos.</p>
     </div>
 </body>
 </html>
@@ -434,6 +742,10 @@ def favicon():
     return HTMLResponse(status_code=204, content="")
 
 
+# =========================
+# EVALUACIÓN
+# =========================
+
 @app.post("/evaluar", response_class=HTMLResponse)
 async def evaluar(
     student_id: str = Form(...),
@@ -444,8 +756,11 @@ async def evaluar(
     student_id_safe = html.escape(student_id.strip())
     forma_safe = html.escape(forma.strip())
 
-    fluidez_name = fluidez_file.filename or "sin_nombre.wav"
-    decod_name = decod_file.filename or "sin_nombre.wav"
+    if forma not in {"2A", "2B"}:
+        return render_error("Forma no válida. Usa 2A o 2B.")
+
+    fluidez_name = fluidez_file.filename or "fluidez.wav"
+    decod_name = decod_file.filename or "decod.wav"
 
     validar_extension(fluidez_name)
     validar_extension(decod_name)
@@ -458,24 +773,26 @@ async def evaluar(
         await guardar_upload(fluidez_file, fluidez_path)
         await guardar_upload(decod_file, decod_path)
 
-        metricas_f = analizar_audio(fluidez_path)
-        metricas_d = analizar_audio(decod_path)
+        # 1) Fluidez: temporal + lingüística
+        met_f = analizar_audio_temporal(fluidez_path)
+        txt_f = transcribir_audio(fluidez_path)
+        flu_ling = analizar_fluidez_linguistica(forma, txt_f)
 
-        fluidez_index = calcular_indice_fluidez(metricas_f)
-        decod_index = calcular_indice_decodificacion(metricas_d)
+        score_temp = puntaje_temporal_fluidez(met_f)
+        score_ling = flu_ling["score_linguistico"]
+        score_fluidez = round(clamp(0.45 * score_temp + 0.55 * score_ling), 4)
+        nivel_fluidez = clasificar_nivel(score_fluidez)
 
-        nivel_f = clasificar(fluidez_index)
-        nivel_d = clasificar(decod_index)
+        # 2) Decodificación
+        txt_d = transcribir_audio(decod_path)
+        decod = alinear_decod(DECOD_REFERENCIA[forma], txt_d)
+        score_decod = decod["score_decod"]
+        nivel_decod = clasificar_nivel(score_decod)
 
-        perfil = perfil_integrado(nivel_f, nivel_d)
-        problema = tipo_problema(nivel_f, nivel_d)
-        estado = estado_lectura(nivel_f, nivel_d)
-        interpretacion = interpretar_resultado(nivel_f, nivel_d)
-        sugerencia = sugerencia_pedagogica(nivel_f, nivel_d)
-        conclusion = conclusion_principal(nivel_f, nivel_d)
-        desc_fluidez = descripcion_fluidez(nivel_f)
-        desc_decod = descripcion_decodificacion(nivel_d)
-        fortalezas, alertas = fortalezas_alertas(nivel_f, nivel_d)
+        fortalezas_f = fortalezas_fluidez(score_temp, score_ling)
+        alertas_f = alertas_fluidez(score_temp, score_ling)
+        fortalezas_d = fortalezas_decod(decod["acc_reales"], decod["acc_pseudos"])
+        alertas_d = alertas_decod(decod["acc_reales"], decod["acc_pseudos"])
 
     except HTTPException as e:
         return render_error(e.detail)
@@ -487,8 +804,26 @@ async def evaluar(
         if decod_path.exists():
             os.remove(decod_path)
 
-    fortalezas_html = "".join(f"<li>{html.escape(x)}</li>" for x in fortalezas)
-    alertas_html = "".join(f"<li>{html.escape(x)}</li>" for x in alertas)
+    fortalezas_f_html = "".join(f"<li>{html.escape(x)}</li>" for x in fortalezas_f)
+    alertas_f_html = "".join(f"<li>{html.escape(x)}</li>" for x in alertas_f)
+    fortalezas_d_html = "".join(f"<li>{html.escape(x)}</li>" for x in fortalezas_d)
+    alertas_d_html = "".join(f"<li>{html.escape(x)}</li>" for x in alertas_d)
+
+    filas_decod = []
+    for r in decod["resultados"]:
+        filas_decod.append(
+            f"""
+            <tr>
+                <td>{r["item"]}</td>
+                <td>{html.escape(r["esperado"])}</td>
+                <td>{html.escape(r["tipo"])}</td>
+                <td>{html.escape(r["producido"])}</td>
+                <td>{r["score"]}</td>
+                <td>{"Sí" if r["correcto"] else "No"}</td>
+            </tr>
+            """
+        )
+    tabla_decod_html = "".join(filas_decod)
 
     return f"""
 <!DOCTYPE html>
@@ -499,7 +834,7 @@ async def evaluar(
     <style>
         body {{
             font-family: Arial, sans-serif;
-            max-width: 1040px;
+            max-width: 1120px;
             margin: 40px auto;
             padding: 20px;
             line-height: 1.6;
@@ -569,6 +904,37 @@ async def evaluar(
             margin-top: 22px;
             font-weight: bold;
         }}
+        .note {{
+            font-size: 13px;
+            color: #475569;
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            padding: 12px;
+            border-radius: 10px;
+            margin-top: 14px;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+            font-size: 13px;
+        }}
+        th, td {{
+            border: 1px solid #e5e7eb;
+            padding: 8px;
+            text-align: left;
+        }}
+        th {{
+            background: #f3f4f6;
+        }}
+        .mono {{
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            white-space: pre-wrap;
+            background: #fafafa;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 12px;
+        }}
         @media (max-width: 800px) {{
             .grid, .two-cols {{
                 grid-template-columns: 1fr;
@@ -580,63 +946,103 @@ async def evaluar(
     <div class="card">
         <div class="hero">
             <h1>Resultado de evaluación</h1>
-            <p><strong>Conclusión principal:</strong> {html.escape(conclusion)}</p>
-            <p class="meta"><strong>ID o nombre:</strong> {student_id_safe} | <strong>Forma:</strong> {forma_safe}</p>
-            <p class="meta"><strong>Estado lector:</strong> <span style="color:{estado_color(estado)};font-weight:bold;">{html.escape(estado)}</span></p>
+            <p><strong>ID o nombre:</strong> {student_id_safe} | <strong>Forma:</strong> {forma_safe}</p>
+            <p class="meta"><strong>Fluidez:</strong> <span class="badge" style="background:{badge_color(nivel_fluidez)};">{nivel_fluidez}</span> | 
+            <strong>Decodificación:</strong> <span class="badge" style="background:{badge_color(nivel_decod)};">{nivel_decod}</span></p>
         </div>
 
         <div class="grid">
             <div class="box">
-                <h2>Fluidez</h2>
-                <p><strong>Archivo:</strong> {html.escape(fluidez_name)}</p>
-                <p><strong>Índice:</strong> {fluidez_index}</p>
-                <p><strong>Nivel:</strong> <span class="badge" style="background:{badge_color(nivel_f)};">{nivel_f}</span></p>
-                <p><strong>¿Qué significa?</strong> {html.escape(desc_fluidez)}</p>
+                <h2>Fluidez híbrida</h2>
+                <p><strong>Puntaje total:</strong> {score_fluidez}</p>
+                <p><strong>Componente temporal:</strong> {round(score_temp, 4)}</p>
+                <p><strong>Componente lingüístico:</strong> {round(score_ling, 4)}</p>
+                <p><strong>Conclusión:</strong> {html.escape(conclusion_fluidez(nivel_fluidez))}</p>
                 <div class="metrics">
-                    <div><strong>Duración:</strong> {round(metricas_f["duracion"], 2)} s</div>
-                    <div><strong>Silencio:</strong> {round(metricas_f["silencio"], 3)}</div>
-                    <div><strong>Energía:</strong> {round(metricas_f["energia"], 4)}</div>
-                    <div><strong>ZCR:</strong> {round(metricas_f["zcr"], 4)}</div>
+                    <div><strong>Duración:</strong> {round(met_f["duracion_s"], 2)} s</div>
+                    <div><strong>Speech ratio:</strong> {round(met_f["speech_ratio"], 3)}</div>
+                    <div><strong>Voz segmento medio:</strong> {round(met_f["voz_segmento_medio_s"], 3)} s</div>
+                    <div><strong>Pausa media:</strong> {round(met_f["pausa_media_s"], 3)} s</div>
+                    <div><strong>Pausas/min:</strong> {round(met_f["pausas_por_min"], 2)}</div>
+                    <div><strong>Pausas largas ratio:</strong> {round(met_f["pausas_largas_ratio"], 3)}</div>
+                    <div><strong>Cobertura textual:</strong> {flu_ling["cobertura"]}</div>
+                    <div><strong>Precisión de ajuste:</strong> {flu_ling["precision_ajuste"]}</div>
+                    <div><strong>Omisiones aprox:</strong> {flu_ling["omisiones_aprox"]}</div>
+                    <div><strong>Repeticiones adyacentes:</strong> {flu_ling["repeticiones_adjacentes"]}</div>
                 </div>
             </div>
 
             <div class="box">
                 <h2>Decodificación</h2>
-                <p><strong>Archivo:</strong> {html.escape(decod_name)}</p>
-                <p><strong>Índice:</strong> {decod_index}</p>
-                <p><strong>Nivel:</strong> <span class="badge" style="background:{badge_color(nivel_d)};">{nivel_d}</span></p>
-                <p><strong>¿Qué significa?</strong> {html.escape(desc_decod)}</p>
+                <p><strong>Puntaje total:</strong> {score_decod}</p>
+                <p><strong>Exactitud total:</strong> {decod["acc_total"]}</p>
+                <p><strong>Palabras reales:</strong> {decod["acc_reales"]}</p>
+                <p><strong>Pseudopalabras:</strong> {decod["acc_pseudos"]}</p>
+                <p><strong>Conclusión:</strong> {html.escape(conclusion_decod(nivel_decod))}</p>
                 <div class="metrics">
-                    <div><strong>Duración:</strong> {round(metricas_d["duracion"], 2)} s</div>
-                    <div><strong>Silencio:</strong> {round(metricas_d["silencio"], 3)}</div>
-                    <div><strong>Energía:</strong> {round(metricas_d["energia"], 4)}</div>
-                    <div><strong>ZCR:</strong> {round(metricas_d["zcr"], 4)}</div>
+                    <div><strong>Items correctos:</strong> {decod["correctos_total"]} / {decod["total_items"]}</div>
                 </div>
             </div>
         </div>
 
-        <div class="section">
-            <h3>Síntesis general</h3>
-            <p><strong>Perfil integrado:</strong> {html.escape(perfil)}</p>
-            <p><strong>Tipo de situación:</strong> {html.escape(problema)}</p>
-            <p><strong>Interpretación:</strong> {html.escape(interpretacion)}</p>
+        <div class="two-cols">
+            <div class="section">
+                <h3>Fortalezas en fluidez</h3>
+                <ul>{fortalezas_f_html}</ul>
+            </div>
+            <div class="section">
+                <h3>Alertas en fluidez</h3>
+                <ul>{alertas_f_html}</ul>
+            </div>
         </div>
 
         <div class="two-cols">
             <div class="section">
-                <h3>Fortalezas observadas</h3>
-                <ul>{fortalezas_html}</ul>
+                <h3>Fortalezas en decodificación</h3>
+                <ul>{fortalezas_d_html}</ul>
             </div>
-
             <div class="section">
-                <h3>Alertas o aspectos a reforzar</h3>
-                <ul>{alertas_html}</ul>
+                <h3>Alertas en decodificación</h3>
+                <ul>{alertas_d_html}</ul>
             </div>
         </div>
 
         <div class="section">
-            <h3>Recomendación</h3>
-            <p>{html.escape(sugerencia)}</p>
+            <h3>Transcripción de fluidez</h3>
+            <div class="mono">{html.escape(txt_f)}</div>
+        </div>
+
+        <div class="section">
+            <h3>Transcripción de decodificación</h3>
+            <div class="mono">{html.escape(txt_d)}</div>
+        </div>
+
+        <div class="section">
+            <h3>Detalle de decodificación</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Item</th>
+                        <th>Esperado</th>
+                        <th>Tipo</th>
+                        <th>Producido</th>
+                        <th>Score</th>
+                        <th>Correcto</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {tabla_decod_html}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h3>Nota metodológica</h3>
+            <p>
+                La fluidez se calcula como un índice híbrido: 
+                <strong>45% temporal</strong> y <strong>55% lingüístico</strong>.
+                La decodificación se calcula comparando la transcripción con la lista esperada de palabras y pseudopalabras de la forma seleccionada.
+            </p>
         </div>
 
         <a href="/">Evaluar otro estudiante</a>
@@ -644,3 +1050,4 @@ async def evaluar(
 </body>
 </html>
 """
+
