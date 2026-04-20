@@ -2,8 +2,10 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from pathlib import Path
 import shutil
-import random
 import html
+
+import librosa
+import numpy as np
 
 app = FastAPI(title="Fluidez App Pro")
 
@@ -86,9 +88,7 @@ def interpretar_resultado(nf: str | None, nd: str | None):
             "algunos componentes para consolidar la lectura."
         )
     if nf == "ALTO" and nd == "ALTO":
-        return (
-            "El desempeño lector aparece bien consolidado tanto en fluidez como en decodificación."
-        )
+        return "El desempeño lector aparece bien consolidado tanto en fluidez como en decodificación."
     return "No fue posible generar una interpretación precisa."
 
 
@@ -198,27 +198,59 @@ def estado_color(estado: str):
     return "#374151"
 
 
-def generar_indices_simulados(caso_demo: str):
-    if caso_demo == "bajo_bajo":
-        fluidez_index = round(random.uniform(0.20, 0.39), 2)
-        decod_index = round(random.uniform(0.20, 0.39), 2)
-    elif caso_demo == "bajo_medio":
-        fluidez_index = round(random.uniform(0.20, 0.39), 2)
-        decod_index = round(random.uniform(0.40, 0.74), 2)
-    elif caso_demo == "medio_bajo":
-        fluidez_index = round(random.uniform(0.40, 0.74), 2)
-        decod_index = round(random.uniform(0.20, 0.39), 2)
-    elif caso_demo == "medio_medio":
-        fluidez_index = round(random.uniform(0.40, 0.74), 2)
-        decod_index = round(random.uniform(0.40, 0.74), 2)
-    elif caso_demo == "alto_alto":
-        fluidez_index = round(random.uniform(0.75, 0.95), 2)
-        decod_index = round(random.uniform(0.75, 0.95), 2)
-    else:
-        fluidez_index = round(random.uniform(0.20, 0.95), 2)
-        decod_index = round(random.uniform(0.20, 0.95), 2)
+def analizar_audio(path: Path):
+    """
+    Análisis acústico básico del audio.
+    """
+    y, sr = librosa.load(str(path), sr=None, mono=True)
 
-    return fluidez_index, decod_index
+    if len(y) == 0:
+        return {
+            "duracion": 0.0,
+            "energia": 0.0,
+            "silencio": 1.0,
+            "zcr": 0.0,
+        }
+
+    duracion = float(librosa.get_duration(y=y, sr=sr))
+    energia = float(np.mean(np.abs(y)))
+    silencio = float(np.mean(np.abs(y) < 0.01))
+    zcr = float(np.mean(librosa.feature.zero_crossing_rate(y=y)))
+
+    return {
+        "duracion": duracion,
+        "energia": energia,
+        "silencio": silencio,
+        "zcr": zcr,
+    }
+
+
+def calcular_indice_fluidez(metricas: dict):
+    """
+    Índice preliminar real de fluidez.
+    Penaliza audios muy largos y con mucho silencio.
+    """
+    duracion = metricas["duracion"]
+    silencio = metricas["silencio"]
+
+    # Ajuste simple y controlado
+    score = 1.0 - (duracion * 0.05 + silencio * 0.8)
+    score = max(0.0, min(1.0, score))
+    return round(score, 2)
+
+
+def calcular_indice_decodificacion(metricas: dict):
+    """
+    Índice preliminar proxy de decodificación.
+    Es todavía exploratorio: usa energía y estabilidad simple.
+    """
+    energia = metricas["energia"]
+    zcr = metricas["zcr"]
+    silencio = metricas["silencio"]
+
+    score = (energia * 8.0) + (zcr * 2.0) - (silencio * 0.5)
+    score = max(0.0, min(1.0, score))
+    return round(score, 2)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -229,7 +261,7 @@ def home():
     <html lang="es">
     <head>
         <meta charset="UTF-8">
-        <title>Fluidez App Pro</title>
+        <title>Fluidez - ComunicaLab</title>
         <style>
             body {
                 font-family: Arial, sans-serif;
@@ -247,7 +279,34 @@ def home():
                 padding: 28px;
                 box-shadow: 0 4px 16px rgba(0,0,0,0.06);
             }
-            h1, h2, h3 {
+            .brand {
+                display: flex;
+                align-items: center;
+                gap: 14px;
+                margin-bottom: 14px;
+            }
+            .brand-mark {
+                width: 52px;
+                height: 52px;
+                border-radius: 14px;
+                background: linear-gradient(135deg, #1d4ed8, #0f172a);
+                color: white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 26px;
+                font-weight: bold;
+            }
+            .brand-text h1 {
+                margin: 0;
+                font-size: 34px;
+            }
+            .brand-text p {
+                margin: 2px 0 0 0;
+                color: #475569;
+                font-size: 14px;
+            }
+            h2, h3 {
                 margin-top: 0;
             }
             label {
@@ -268,7 +327,7 @@ def home():
             button {
                 cursor: pointer;
                 font-weight: bold;
-                background: #111827;
+                background: linear-gradient(135deg, #0f172a, #1d4ed8);
                 color: white;
                 border: none;
             }
@@ -289,12 +348,19 @@ def home():
     </head>
     <body>
         <div class="card">
-            <h1>Fluidez App Pro</h1>
+            <div class="brand">
+                <div class="brand-mark">F</div>
+                <div class="brand-text">
+                    <h1>Fluidez</h1>
+                    <p>by ComunicaLab</p>
+                </div>
+            </div>
+
             <p>Sube un audio de fluidez y uno de decodificación para obtener una evaluación lectora integrada.</p>
 
             <div class="demo">
-                Versión demo avanzada: acepta cualquier nombre de archivo. Los resultados siguen siendo simulados
-                mediante el caso demo seleccionado, mientras se integra el motor real de análisis.
+                Esta versión ya no usa simulación guiada por el usuario. Realiza un análisis acústico básico del audio
+                para estimar preliminarmente fluidez y decodificación.
             </div>
 
             <form action="/evaluar" method="post" enctype="multipart/form-data">
@@ -305,16 +371,6 @@ def home():
                 <select name="forma" required>
                     <option value="2A">2A</option>
                     <option value="2B">2B</option>
-                </select>
-
-                <label>Caso demo esperado</label>
-                <select name="caso_demo" required>
-                    <option value="aleatorio">Aleatorio</option>
-                    <option value="alto_alto">Desempeño consolidado</option>
-                    <option value="medio_medio">Lectura en desarrollo</option>
-                    <option value="bajo_bajo">Dificultad general de lectura</option>
-                    <option value="bajo_medio">Dificultad predominante en fluidez</option>
-                    <option value="medio_bajo">Dificultad predominante en decodificación</option>
                 </select>
 
                 <label>Archivo de Fluidez</label>
@@ -344,13 +400,11 @@ def favicon():
 async def evaluar(
     student_id: str = Form(...),
     forma: str = Form(...),
-    caso_demo: str = Form(...),
     fluidez_file: UploadFile = File(...),
     decod_file: UploadFile = File(...),
 ):
     student_id_safe = html.escape(student_id.strip())
     forma_safe = html.escape(forma.strip())
-    caso_demo_safe = html.escape(caso_demo.strip())
 
     fluidez_name = fluidez_file.filename or "sin_nombre"
     decod_name = decod_file.filename or "sin_nombre"
@@ -367,7 +421,11 @@ async def evaluar(
     with open(decod_path, "wb") as buffer:
         shutil.copyfileobj(decod_file.file, buffer)
 
-    fluidez_index, decod_index = generar_indices_simulados(caso_demo)
+    metricas_f = analizar_audio(fluidez_path)
+    metricas_d = analizar_audio(decod_path)
+
+    fluidez_index = calcular_indice_fluidez(metricas_f)
+    decod_index = calcular_indice_decodificacion(metricas_d)
 
     nivel_f = clasificar(fluidez_index)
     nivel_d = clasificar(decod_index)
@@ -396,7 +454,7 @@ async def evaluar(
     <html lang="es">
     <head>
         <meta charset="UTF-8">
-        <title>Resultado</title>
+        <title>Resultado | Fluidez</title>
         <style>
             body {{
                 font-family: Arial, sans-serif;
@@ -471,6 +529,11 @@ async def evaluar(
             .state {{
                 font-weight: bold;
             }}
+            .metrics {{
+                font-size: 13px;
+                color: #475569;
+                margin-top: 12px;
+            }}
             @media (max-width: 800px) {{
                 .grid, .two-cols {{
                     grid-template-columns: 1fr;
@@ -485,8 +548,7 @@ async def evaluar(
                 <p><strong>Conclusión principal:</strong> {html.escape(conclusion)}</p>
                 <p class="meta">
                     <strong>ID o nombre:</strong> {student_id_safe} |
-                    <strong>Forma:</strong> {forma_safe} |
-                    <strong>Caso demo:</strong> {caso_demo_safe}
+                    <strong>Forma:</strong> {forma_safe}
                 </p>
                 <p class="meta">
                     <strong>Estado lector:</strong>
@@ -504,6 +566,11 @@ async def evaluar(
                         <span class="badge" style="background:{badge_color(nivel_f)};">{nivel_f}</span>
                     </p>
                     <p><strong>¿Qué significa?</strong> {html.escape(desc_fluidez)}</p>
+                    <div class="metrics">
+                        <div><strong>Duración:</strong> {round(metricas_f["duracion"], 2)} s</div>
+                        <div><strong>Silencio:</strong> {round(metricas_f["silencio"], 3)}</div>
+                        <div><strong>Energía:</strong> {round(metricas_f["energia"], 4)}</div>
+                    </div>
                 </div>
 
                 <div class="box">
@@ -515,6 +582,11 @@ async def evaluar(
                         <span class="badge" style="background:{badge_color(nivel_d)};">{nivel_d}</span>
                     </p>
                     <p><strong>¿Qué significa?</strong> {html.escape(desc_decod)}</p>
+                    <div class="metrics">
+                        <div><strong>Duración:</strong> {round(metricas_d["duracion"], 2)} s</div>
+                        <div><strong>Silencio:</strong> {round(metricas_d["silencio"], 3)}</div>
+                        <div><strong>Energía:</strong> {round(metricas_d["energia"], 4)}</div>
+                    </div>
                 </div>
             </div>
 
@@ -556,4 +628,5 @@ async def evaluar(
         </div>
     </body>
     </html>
+    """
     """
