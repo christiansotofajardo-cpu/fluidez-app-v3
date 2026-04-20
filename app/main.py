@@ -5,26 +5,13 @@ import shutil
 import random
 import html
 
-app = FastAPI(title="Fluidez App v2")
+app = FastAPI(title="Fluidez App Pro")
 
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg"}
 
-def detectar_tipo_y_forma(nombre: str):
-    n = nombre.upper()
-
-    if "FL2A" in n:
-        return "fluidez", "2A"
-    if "FL2B" in n:
-        return "fluidez", "2B"
-    if "DEC2A" in n:
-        return "decodificacion", "2A"
-    if "DEC2B" in n:
-        return "decodificacion", "2B"
-
-    return None, None
 
 def validar_extension(filename: str):
     ext = Path(filename).suffix.lower()
@@ -33,6 +20,7 @@ def validar_extension(filename: str):
             status_code=400,
             detail=f"Extensión no permitida: {ext}. Usa {', '.join(sorted(ALLOWED_EXTENSIONS))}"
         )
+
 
 def clasificar(valor: float | None):
     if valor is None:
@@ -43,6 +31,7 @@ def clasificar(valor: float | None):
         return "MEDIO"
     return "BAJO"
 
+
 def perfil_integrado(nf: str | None, nd: str | None):
     if nf and nd:
         return f"Fluidez {nf} - Decodificación {nd}"
@@ -52,52 +41,139 @@ def perfil_integrado(nf: str | None, nd: str | None):
         return f"Solo Decodificación {nd}"
     return "Sin datos"
 
+
 def tipo_problema(nf: str | None, nd: str | None):
     if nf == "BAJO" and nd == "BAJO":
-        return "mixto"
+        return "Dificultad mixta"
     if nf == "BAJO":
-        return "fluidez"
+        return "Dificultad predominante en fluidez"
     if nd == "BAJO":
-        return "decodificacion"
-    return "sin_dificultad"
+        return "Dificultad predominante en decodificación"
+    return "Sin dificultades relevantes"
+
 
 def estado_lectura(nf: str | None, nd: str | None):
     if nf == "ALTO" and nd == "ALTO":
-        return "consolidado"
+        return "Consolidado"
     if nf == "BAJO" and nd == "BAJO":
-        return "descendido"
+        return "Descendido"
     if nf == "MEDIO" or nd == "MEDIO":
-        return "en_desarrollo"
+        return "En desarrollo"
     if nf == "BAJO" or nd == "BAJO":
-        return "en_riesgo"
-    return "indeterminado"
+        return "En riesgo"
+    return "Indeterminado"
+
 
 def interpretar_resultado(nf: str | None, nd: str | None):
     if nf == "BAJO" and nd == "BAJO":
         return (
-            "El estudiante presenta dificultades tanto en decodificación como en fluidez, "
-            "lo que sugiere un proceso lector poco automatizado y con debilidades en precisión y velocidad."
+            "Se observan dificultades tanto en la precisión para reconocer palabras como en la fluidez de la lectura. "
+            "Esto sugiere un proceso lector aún poco automatizado."
         )
     if nf == "BAJO" and nd in {"MEDIO", "ALTO"}:
         return (
-            "El estudiante muestra una dificultad predominante en fluidez. "
-            "La decodificación parece relativamente preservada, pero la lectura aún no se automatiza adecuadamente."
+            "La precisión lectora aparece relativamente preservada, pero la lectura todavía se realiza con lentitud "
+            "o con poca continuidad."
         )
     if nd == "BAJO" and nf in {"MEDIO", "ALTO"}:
         return (
-            "El estudiante muestra una dificultad predominante en decodificación. "
-            "Esto sugiere problemas en reconocimiento preciso de palabras que pueden afectar el rendimiento lector global."
+            "La lectura presenta dificultades en el reconocimiento preciso de palabras, lo que puede afectar el rendimiento "
+            "lector general."
         )
     if nf == "MEDIO" or nd == "MEDIO":
         return (
-            "El estudiante se encuentra en una zona intermedia de desarrollo lector. "
-            "Se recomienda seguimiento y fortalecimiento focalizado según el componente más descendido."
+            "El desempeño lector se encuentra en una zona intermedia. Hay avances, pero todavía conviene reforzar "
+            "algunos componentes para consolidar la lectura."
         )
     if nf == "ALTO" and nd == "ALTO":
         return (
-            "El estudiante presenta un desempeño lector consolidado en fluidez y decodificación."
+            "El desempeño lector aparece bien consolidado tanto en fluidez como en decodificación."
         )
     return "No fue posible generar una interpretación precisa."
+
+
+def sugerencia_pedagogica(nf: str | None, nd: str | None):
+    if nf == "BAJO" and nd == "BAJO":
+        return (
+            "Se recomienda práctica guiada frecuente, con apoyo en reconocimiento de palabras y lectura oral breve "
+            "para fortalecer precisión y automatización."
+        )
+    if nf == "BAJO":
+        return (
+            "Se recomienda reforzar lectura en voz alta con acompañamiento, buscando mejorar ritmo, continuidad y seguridad."
+        )
+    if nd == "BAJO":
+        return (
+            "Se recomienda trabajar reconocimiento preciso de palabras, lectura de sílabas y correspondencias grafema-sonido."
+        )
+    if nf == "MEDIO" or nd == "MEDIO":
+        return (
+            "Se recomienda continuar con práctica lectora regular y seguimiento para consolidar el desempeño."
+        )
+    if nf == "ALTO" and nd == "ALTO":
+        return (
+            "Se sugiere mantener la práctica lectora y avanzar hacia textos más complejos para seguir desarrollando comprensión y soltura."
+        )
+    return "Sin sugerencia específica."
+
+
+def conclusion_principal(nf: str | None, nd: str | None):
+    if nf == "ALTO" and nd == "ALTO":
+        return "Lectura fluida y precisa para su nivel"
+    if nf == "BAJO" and nd == "BAJO":
+        return "Se observan dificultades importantes en la lectura"
+    if nf == "BAJO":
+        return "Se observa una dificultad principal en la fluidez lectora"
+    if nd == "BAJO":
+        return "Se observa una dificultad principal en la precisión lectora"
+    return "La lectura se encuentra en proceso de consolidación"
+
+
+def descripcion_fluidez(nivel: str | None):
+    if nivel == "ALTO":
+        return "La lectura oral muestra buen ritmo, continuidad y seguridad."
+    if nivel == "MEDIO":
+        return "La lectura oral se encuentra en desarrollo y todavía puede ganar continuidad y soltura."
+    if nivel == "BAJO":
+        return "La lectura oral presenta lentitud, pausas excesivas o poca continuidad."
+    return "Sin información suficiente."
+
+
+def descripcion_decodificacion(nivel: str | None):
+    if nivel == "ALTO":
+        return "El reconocimiento de palabras aparece preciso y estable."
+    if nivel == "MEDIO":
+        return "El reconocimiento de palabras está en desarrollo, con necesidad de mayor consolidación."
+    if nivel == "BAJO":
+        return "Se observan debilidades en el reconocimiento preciso de palabras."
+    return "Sin información suficiente."
+
+
+def fortalezas_alertas(nf: str | None, nd: str | None):
+    fortalezas = []
+    alertas = []
+
+    if nf == "ALTO":
+        fortalezas.append("Buena continuidad y ritmo de lectura.")
+    elif nf == "MEDIO":
+        alertas.append("La fluidez todavía requiere consolidación.")
+    elif nf == "BAJO":
+        alertas.append("La fluidez lectora aparece descendida.")
+
+    if nd == "ALTO":
+        fortalezas.append("Reconocimiento preciso de palabras.")
+    elif nd == "MEDIO":
+        alertas.append("La decodificación se encuentra en desarrollo.")
+    elif nd == "BAJO":
+        alertas.append("La precisión en la lectura de palabras requiere apoyo.")
+
+    if not fortalezas:
+        fortalezas.append("Se recomienda seguir observando progresos a medida que avance la práctica lectora.")
+    if not alertas:
+        alertas.append("No se detectan alertas relevantes en esta evaluación.")
+
+    return fortalezas, alertas
+
 
 def badge_color(nivel: str | None):
     if nivel == "ALTO":
@@ -108,33 +184,42 @@ def badge_color(nivel: str | None):
         return "#fee2e2"
     return "#e5e7eb"
 
-def texto_desde_nombre(nombre: str):
-    n = nombre.upper()
-    if "MALO" in n:
-        return "malo"
-    if "BUENO" in n:
-        return "bueno"
-    return "neutro"
 
-def generar_indices_simulados(nombre_fluidez: str, nombre_decod: str):
-    marcador_f = texto_desde_nombre(nombre_fluidez)
-    marcador_d = texto_desde_nombre(nombre_decod)
+def estado_color(estado: str):
+    estado = estado.lower()
+    if estado == "consolidado":
+        return "#065f46"
+    if estado == "en desarrollo":
+        return "#92400e"
+    if estado == "en riesgo":
+        return "#9a3412"
+    if estado == "descendido":
+        return "#991b1b"
+    return "#374151"
 
-    if marcador_f == "malo":
+
+def generar_indices_simulados(caso_demo: str):
+    if caso_demo == "bajo_bajo":
         fluidez_index = round(random.uniform(0.20, 0.39), 2)
-    elif marcador_f == "bueno":
-        fluidez_index = round(random.uniform(0.75, 0.95), 2)
-    else:
-        fluidez_index = round(random.uniform(0.40, 0.74), 2)
-
-    if marcador_d == "malo":
         decod_index = round(random.uniform(0.20, 0.39), 2)
-    elif marcador_d == "bueno":
+    elif caso_demo == "bajo_medio":
+        fluidez_index = round(random.uniform(0.20, 0.39), 2)
+        decod_index = round(random.uniform(0.40, 0.74), 2)
+    elif caso_demo == "medio_bajo":
+        fluidez_index = round(random.uniform(0.40, 0.74), 2)
+        decod_index = round(random.uniform(0.20, 0.39), 2)
+    elif caso_demo == "medio_medio":
+        fluidez_index = round(random.uniform(0.40, 0.74), 2)
+        decod_index = round(random.uniform(0.40, 0.74), 2)
+    elif caso_demo == "alto_alto":
+        fluidez_index = round(random.uniform(0.75, 0.95), 2)
         decod_index = round(random.uniform(0.75, 0.95), 2)
     else:
-        decod_index = round(random.uniform(0.40, 0.74), 2)
+        fluidez_index = round(random.uniform(0.20, 0.95), 2)
+        decod_index = round(random.uniform(0.20, 0.95), 2)
 
     return fluidez_index, decod_index
+
 
 @app.get("/", response_class=HTMLResponse)
 @app.head("/", response_class=HTMLResponse)
@@ -144,117 +229,134 @@ def home():
     <html lang="es">
     <head>
         <meta charset="UTF-8">
-        <title>Fluidez App v2</title>
+        <title>Fluidez App Pro</title>
         <style>
             body {
                 font-family: Arial, sans-serif;
-                max-width: 860px;
+                max-width: 960px;
                 margin: 40px auto;
                 padding: 20px;
                 line-height: 1.5;
+                background: #f8fafc;
+                color: #111827;
             }
             .card {
-                border: 1px solid #ddd;
-                border-radius: 12px;
-                padding: 24px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+                background: white;
+                border: 1px solid #e5e7eb;
+                border-radius: 16px;
+                padding: 28px;
+                box-shadow: 0 4px 16px rgba(0,0,0,0.06);
             }
-            h1, h2 { margin-top: 0; }
-            input, button {
-                padding: 10px;
+            h1, h2, h3 {
+                margin-top: 0;
+            }
+            label {
+                display: block;
+                margin-top: 8px;
+                font-weight: bold;
+            }
+            input, button, select {
+                padding: 12px;
                 margin-top: 6px;
                 margin-bottom: 16px;
                 width: 100%;
                 box-sizing: border-box;
+                border-radius: 10px;
+                border: 1px solid #d1d5db;
+                font-size: 15px;
             }
             button {
                 cursor: pointer;
                 font-weight: bold;
+                background: #111827;
+                color: white;
+                border: none;
             }
             .small {
-                color: #555;
+                color: #4b5563;
                 font-size: 14px;
             }
             .demo {
-                background: #f3f4f6;
-                padding: 12px;
-                border-radius: 8px;
+                background: #eef2ff;
+                color: #3730a3;
+                padding: 14px;
+                border-radius: 10px;
                 font-size: 14px;
+                margin-bottom: 18px;
+                border: 1px solid #c7d2fe;
             }
         </style>
     </head>
     <body>
         <div class="card">
-            <h1>Fluidez App v2</h1>
-            <p>Sube un audio de fluidez y uno de decodificación para obtener un perfil lector integrado.</p>
+            <h1>Fluidez App Pro</h1>
+            <p>Sube un audio de fluidez y uno de decodificación para obtener una evaluación lectora integrada.</p>
 
             <div class="demo">
-                Esta versión entrega resultados simulados inteligentes según el nombre del archivo
-                (por ejemplo, "MALO" o "BUENO"), mientras se integra el motor real de análisis.
+                Versión demo avanzada: acepta cualquier nombre de archivo. Los resultados siguen siendo simulados
+                mediante el caso demo seleccionado, mientras se integra el motor real de análisis.
             </div>
 
             <form action="/evaluar" method="post" enctype="multipart/form-data">
-                <label><strong>ID del estudiante</strong></label>
-                <input type="text" name="student_id" placeholder="Ej: S001" required />
+                <label>ID o nombre del estudiante</label>
+                <input type="text" name="student_id" placeholder="Ej: S001 o Nombre del estudiante" required />
 
-                <label><strong>Archivo de Fluidez</strong></label>
+                <label>Forma</label>
+                <select name="forma" required>
+                    <option value="2A">2A</option>
+                    <option value="2B">2B</option>
+                </select>
+
+                <label>Caso demo esperado</label>
+                <select name="caso_demo" required>
+                    <option value="aleatorio">Aleatorio</option>
+                    <option value="alto_alto">Desempeño consolidado</option>
+                    <option value="medio_medio">Lectura en desarrollo</option>
+                    <option value="bajo_bajo">Dificultad general de lectura</option>
+                    <option value="bajo_medio">Dificultad predominante en fluidez</option>
+                    <option value="medio_bajo">Dificultad predominante en decodificación</option>
+                </select>
+
+                <label>Archivo de Fluidez</label>
                 <input type="file" name="fluidez_file" required />
 
-                <label><strong>Archivo de Decodificación</strong></label>
+                <label>Archivo de Decodificación</label>
                 <input type="file" name="decod_file" required />
 
                 <button type="submit">Evaluar</button>
             </form>
 
             <p class="small">
-                El nombre del archivo debe incluir FL2A o FL2B para fluidez, y DEC2A o DEC2B para decodificación.
+                Se valida la extensión del archivo, pero no su nombre.
             </p>
         </div>
     </body>
     </html>
     """
 
+
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
     return HTMLResponse(status_code=204, content="")
 
+
 @app.post("/evaluar", response_class=HTMLResponse)
 async def evaluar(
     student_id: str = Form(...),
+    forma: str = Form(...),
+    caso_demo: str = Form(...),
     fluidez_file: UploadFile = File(...),
     decod_file: UploadFile = File(...),
 ):
     student_id_safe = html.escape(student_id.strip())
+    forma_safe = html.escape(forma.strip())
+    caso_demo_safe = html.escape(caso_demo.strip())
+
     fluidez_name = fluidez_file.filename or "sin_nombre"
     decod_name = decod_file.filename or "sin_nombre"
 
     validar_extension(fluidez_name)
     validar_extension(decod_name)
-
-    tipo_f, forma_f = detectar_tipo_y_forma(fluidez_name)
-    tipo_d, forma_d = detectar_tipo_y_forma(decod_name)
-
-    if tipo_f != "fluidez":
-        return """
-        <h2>Error</h2>
-        <p>El archivo de fluidez no contiene una etiqueta válida como FL2A o FL2B.</p>
-        <a href="/">Volver</a>
-        """
-
-    if tipo_d != "decodificacion":
-        return """
-        <h2>Error</h2>
-        <p>El archivo de decodificación no contiene una etiqueta válida como DEC2A o DEC2B.</p>
-        <a href="/">Volver</a>
-        """
-
-    if forma_f != forma_d:
-        return f"""
-        <h2>Error</h2>
-        <p>Las formas no coinciden: Fluidez = {forma_f}, Decodificación = {forma_d}.</p>
-        <p>Debes subir archivos de la misma forma (por ejemplo, ambos 2A).</p>
-        <a href="/">Volver</a>
-        """
 
     fluidez_path = UPLOAD_DIR / Path(fluidez_name).name
     decod_path = UPLOAD_DIR / Path(decod_name).name
@@ -265,7 +367,7 @@ async def evaluar(
     with open(decod_path, "wb") as buffer:
         shutil.copyfileobj(decod_file.file, buffer)
 
-    fluidez_index, decod_index = generar_indices_simulados(fluidez_name, decod_name)
+    fluidez_index, decod_index = generar_indices_simulados(caso_demo)
 
     nivel_f = clasificar(fluidez_index)
     nivel_d = clasificar(decod_index)
@@ -274,12 +376,20 @@ async def evaluar(
     problema = tipo_problema(nivel_f, nivel_d)
     estado = estado_lectura(nivel_f, nivel_d)
     interpretacion = interpretar_resultado(nivel_f, nivel_d)
+    sugerencia = sugerencia_pedagogica(nivel_f, nivel_d)
+    conclusion = conclusion_principal(nivel_f, nivel_d)
+    desc_fluidez = descripcion_fluidez(nivel_f)
+    desc_decod = descripcion_decodificacion(nivel_d)
+    fortalezas, alertas = fortalezas_alertas(nivel_f, nivel_d)
 
     fluidez_path.unlink(missing_ok=True)
     decod_path.unlink(missing_ok=True)
 
     fluidez_name_safe = html.escape(fluidez_name)
     decod_name_safe = html.escape(decod_name)
+
+    fortalezas_html = "".join([f"<li>{html.escape(x)}</li>" for x in fortalezas])
+    alertas_html = "".join([f"<li>{html.escape(x)}</li>" for x in alertas])
 
     return f"""
     <!DOCTYPE html>
@@ -290,16 +400,33 @@ async def evaluar(
         <style>
             body {{
                 font-family: Arial, sans-serif;
-                max-width: 920px;
+                max-width: 1040px;
                 margin: 40px auto;
                 padding: 20px;
-                line-height: 1.5;
+                line-height: 1.6;
+                background: #f8fafc;
+                color: #111827;
             }}
             .card {{
-                border: 1px solid #ddd;
-                border-radius: 12px;
-                padding: 24px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+                background: white;
+                border: 1px solid #e5e7eb;
+                border-radius: 16px;
+                padding: 28px;
+                box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+            }}
+            .hero {{
+                background: linear-gradient(135deg, #eef2ff, #f8fafc);
+                border: 1px solid #dbeafe;
+                border-radius: 14px;
+                padding: 18px;
+                margin-bottom: 20px;
+            }}
+            .hero h1 {{
+                margin-bottom: 8px;
+            }}
+            .meta {{
+                color: #4b5563;
+                font-size: 14px;
             }}
             .grid {{
                 display: grid;
@@ -309,8 +436,9 @@ async def evaluar(
             }}
             .box {{
                 border: 1px solid #e5e7eb;
-                border-radius: 10px;
-                padding: 16px;
+                border-radius: 12px;
+                padding: 18px;
+                background: #ffffff;
             }}
             .badge {{
                 display: inline-block;
@@ -318,23 +446,53 @@ async def evaluar(
                 border-radius: 999px;
                 font-weight: bold;
             }}
-            .summary {{
+            .section {{
                 margin-top: 20px;
                 background: #f9fafb;
-                border-radius: 10px;
-                padding: 16px;
+                border-radius: 12px;
+                padding: 18px;
+                border: 1px solid #e5e7eb;
+            }}
+            .two-cols {{
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 16px;
+                margin-top: 16px;
+            }}
+            ul {{
+                margin-top: 8px;
+                padding-left: 20px;
             }}
             a {{
                 display: inline-block;
-                margin-top: 20px;
+                margin-top: 22px;
+                font-weight: bold;
+            }}
+            .state {{
+                font-weight: bold;
+            }}
+            @media (max-width: 800px) {{
+                .grid, .two-cols {{
+                    grid-template-columns: 1fr;
+                }}
             }}
         </style>
     </head>
     <body>
         <div class="card">
-            <h1>Resultado de evaluación</h1>
-            <p><strong>ID estudiante:</strong> {student_id_safe}</p>
-            <p><strong>Forma:</strong> {forma_f}</p>
+            <div class="hero">
+                <h1>Resultado de evaluación</h1>
+                <p><strong>Conclusión principal:</strong> {html.escape(conclusion)}</p>
+                <p class="meta">
+                    <strong>ID o nombre:</strong> {student_id_safe} |
+                    <strong>Forma:</strong> {forma_safe} |
+                    <strong>Caso demo:</strong> {caso_demo_safe}
+                </p>
+                <p class="meta">
+                    <strong>Estado lector:</strong>
+                    <span class="state" style="color:{estado_color(estado)};">{html.escape(estado)}</span>
+                </p>
+            </div>
 
             <div class="grid">
                 <div class="box">
@@ -345,6 +503,7 @@ async def evaluar(
                         <strong>Nivel:</strong>
                         <span class="badge" style="background:{badge_color(nivel_f)};">{nivel_f}</span>
                     </p>
+                    <p><strong>¿Qué significa?</strong> {html.escape(desc_fluidez)}</p>
                 </div>
 
                 <div class="box">
@@ -355,14 +514,42 @@ async def evaluar(
                         <strong>Nivel:</strong>
                         <span class="badge" style="background:{badge_color(nivel_d)};">{nivel_d}</span>
                     </p>
+                    <p><strong>¿Qué significa?</strong> {html.escape(desc_decod)}</p>
                 </div>
             </div>
 
-            <div class="summary">
-                <p><strong>Perfil integrado:</strong> {perfil}</p>
-                <p><strong>Tipo de problema:</strong> {problema}</p>
-                <p><strong>Estado lector:</strong> {estado}</p>
-                <p><strong>Interpretación:</strong> {interpretacion}</p>
+            <div class="section">
+                <h3>Síntesis general</h3>
+                <p><strong>Perfil integrado:</strong> {html.escape(perfil)}</p>
+                <p><strong>Tipo de situación:</strong> {html.escape(problema)}</p>
+                <p><strong>Interpretación:</strong> {html.escape(interpretacion)}</p>
+            </div>
+
+            <div class="two-cols">
+                <div class="section">
+                    <h3>Fortalezas observadas</h3>
+                    <ul>
+                        {fortalezas_html}
+                    </ul>
+                </div>
+
+                <div class="section">
+                    <h3>Alertas o aspectos a reforzar</h3>
+                    <ul>
+                        {alertas_html}
+                    </ul>
+                </div>
+            </div>
+
+            <div class="section">
+                <h3>Recomendación</h3>
+                <p>{html.escape(sugerencia)}</p>
+            </div>
+
+            <div class="section">
+                <h3>Definiciones simples</h3>
+                <p><strong>Fluidez:</strong> capacidad de leer con ritmo, continuidad y cierta naturalidad.</p>
+                <p><strong>Decodificación:</strong> capacidad de reconocer correctamente las palabras escritas.</p>
             </div>
 
             <a href="/">Evaluar otro estudiante</a>
