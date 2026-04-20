@@ -3,16 +3,22 @@ from fastapi.responses import HTMLResponse
 from pathlib import Path
 import shutil
 import html
+import os
+import uuid
 
-import librosa
 import numpy as np
+import soundfile as sf
+import librosa
 
 app = FastAPI(title="Fluidez - ComunicaLab")
 
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-ALLOWED_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg"}
+# Para una primera versión estable en Render:
+ALLOWED_EXTENSIONS = {".wav"}
+MAX_FILE_SIZE_MB = 15
+MAX_AUDIO_SECONDS = 180
 
 
 def validar_extension(filename: str):
@@ -20,8 +26,25 @@ def validar_extension(filename: str):
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Extensión no permitida: {ext}. Usa {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+            detail=f"Extensión no permitida: {ext}. Por ahora usa solo archivos .wav",
         )
+
+
+async def guardar_upload(upload: UploadFile, destino: Path):
+    size = 0
+    with open(destino, "wb") as buffer:
+        while True:
+            chunk = await upload.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_FILE_SIZE_MB * 1024 * 1024:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El archivo {upload.filename} supera el máximo de {MAX_FILE_SIZE_MB} MB."
+                )
+            buffer.write(chunk)
+    await upload.close()
 
 
 def clasificar(valor: float | None):
@@ -68,25 +91,13 @@ def estado_lectura(nf: str | None, nd: str | None):
 
 def interpretar_resultado(nf: str | None, nd: str | None):
     if nf == "BAJO" and nd == "BAJO":
-        return (
-            "Se observan dificultades tanto en la precisión para reconocer palabras "
-            "como en la fluidez de la lectura."
-        )
+        return "Se observan dificultades tanto en la precisión para reconocer palabras como en la fluidez de la lectura."
     if nf == "BAJO" and nd in {"MEDIO", "ALTO"}:
-        return (
-            "La precisión lectora aparece relativamente preservada, pero la lectura "
-            "todavía se realiza con lentitud o con poca continuidad."
-        )
+        return "La precisión lectora aparece relativamente preservada, pero la lectura todavía se realiza con lentitud o con poca continuidad."
     if nd == "BAJO" and nf in {"MEDIO", "ALTO"}:
-        return (
-            "La lectura presenta dificultades en el reconocimiento preciso de palabras, "
-            "lo que puede afectar el rendimiento lector general."
-        )
+        return "La lectura presenta dificultades en el reconocimiento preciso de palabras, lo que puede afectar el rendimiento lector general."
     if nf == "MEDIO" or nd == "MEDIO":
-        return (
-            "El desempeño lector se encuentra en una zona intermedia y todavía conviene "
-            "reforzar algunos componentes."
-        )
+        return "El desempeño lector se encuentra en una zona intermedia y todavía conviene reforzar algunos componentes."
     if nf == "ALTO" and nd == "ALTO":
         return "El desempeño lector aparece bien consolidado tanto en fluidez como en decodificación."
     return "No fue posible generar una interpretación precisa."
@@ -94,17 +105,11 @@ def interpretar_resultado(nf: str | None, nd: str | None):
 
 def sugerencia_pedagogica(nf: str | None, nd: str | None):
     if nf == "BAJO" and nd == "BAJO":
-        return (
-            "Se recomienda práctica guiada frecuente, con apoyo en reconocimiento de "
-            "palabras y lectura oral breve."
-        )
+        return "Se recomienda práctica guiada frecuente, con apoyo en reconocimiento de palabras y lectura oral breve."
     if nf == "BAJO":
         return "Se recomienda reforzar lectura en voz alta con acompañamiento."
     if nd == "BAJO":
-        return (
-            "Se recomienda trabajar reconocimiento preciso de palabras, lectura de sílabas "
-            "y correspondencias grafema-sonido."
-        )
+        return "Se recomienda trabajar reconocimiento preciso de palabras, lectura de sílabas y correspondencias grafema-sonido."
     if nf == "MEDIO" or nd == "MEDIO":
         return "Se recomienda continuar con práctica lectora regular y seguimiento."
     if nf == "ALTO" and nd == "ALTO":
@@ -194,15 +199,31 @@ def estado_color(estado: str):
 
 
 def analizar_audio(path: Path):
-    y, sr = librosa.load(str(path), sr=None, mono=True)
+    try:
+        y, sr = sf.read(str(path), always_2d=False)
+        if y.ndim > 1:
+            y = np.mean(y, axis=1)
+        y = y.astype(np.float32, copy=False)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"No se pudo leer el audio WAV: {path.name}. Error: {str(e)}")
 
-    if len(y) == 0:
+    if y.size == 0:
         return {"duracion": 0.0, "energia": 0.0, "silencio": 1.0, "zcr": 0.0}
 
-    duracion = float(librosa.get_duration(y=y, sr=sr))
+    duracion = float(len(y) / sr)
+    if duracion > MAX_AUDIO_SECONDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"El audio {path.name} dura {round(duracion,1)} s. Máximo permitido: {MAX_AUDIO_SECONDS} s."
+        )
+
+    max_abs = np.max(np.abs(y))
+    if max_abs > 0:
+        y = y / max_abs
+
     energia = float(np.mean(np.abs(y)))
     silencio = float(np.mean(np.abs(y) < 0.01))
-    zcr = float(np.mean(librosa.feature.zero_crossing_rate(y=y)))
+    zcr = float(np.mean(librosa.feature.zero_crossing_rate(y=y, frame_length=2048, hop_length=512)))
 
     return {
         "duracion": duracion,
@@ -220,6 +241,58 @@ def calcular_indice_fluidez(metricas: dict):
 def calcular_indice_decodificacion(metricas: dict):
     score = (metricas["energia"] * 8.0) + (metricas["zcr"] * 2.0) - (metricas["silencio"] * 0.5)
     return round(max(0.0, min(1.0, score)), 2)
+
+
+def render_error(message: str):
+    msg = html.escape(message)
+    return HTMLResponse(
+        status_code=400,
+        content=f"""
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Error | Fluidez</title>
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            max-width: 860px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f8fafc;
+            color: #111827;
+        }}
+        .card {{
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 16px;
+            padding: 28px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+        }}
+        .err {{
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+            padding: 16px;
+            border-radius: 12px;
+        }}
+        a {{
+            display: inline-block;
+            margin-top: 20px;
+            font-weight: bold;
+        }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>No se pudo procesar la evaluación</h1>
+        <div class="err">{msg}</div>
+        <a href="/">Volver</a>
+    </div>
+</body>
+</html>
+"""
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -325,8 +398,9 @@ def home():
         <p>Sube un audio de fluidez y uno de decodificación para obtener una evaluación lectora integrada.</p>
 
         <div class="demo">
-            Esta versión realiza un análisis acústico básico del audio para estimar preliminarmente
-            fluidez y decodificación.
+            Esta versión realiza un análisis acústico básico del audio para estimar preliminarmente fluidez y decodificación.
+            <br><br>
+            Formato admitido en esta versión estable: <strong>.wav</strong>
         </div>
 
         <form action="/evaluar" method="post" enctype="multipart/form-data">
@@ -340,15 +414,15 @@ def home():
             </select>
 
             <label>Archivo de Fluidez</label>
-            <input type="file" name="fluidez_file" required />
+            <input type="file" name="fluidez_file" accept=".wav" required />
 
             <label>Archivo de Decodificación</label>
-            <input type="file" name="decod_file" required />
+            <input type="file" name="decod_file" accept=".wav" required />
 
             <button type="submit">Evaluar</button>
         </form>
 
-        <p class="small">Se valida la extensión del archivo, pero no su nombre.</p>
+        <p class="small">Máximo por archivo: 15 MB. Duración máxima: 180 segundos.</p>
     </div>
 </body>
 </html>
@@ -370,50 +444,53 @@ async def evaluar(
     student_id_safe = html.escape(student_id.strip())
     forma_safe = html.escape(forma.strip())
 
-    fluidez_name = fluidez_file.filename or "sin_nombre"
-    decod_name = decod_file.filename or "sin_nombre"
+    fluidez_name = fluidez_file.filename or "sin_nombre.wav"
+    decod_name = decod_file.filename or "sin_nombre.wav"
 
     validar_extension(fluidez_name)
     validar_extension(decod_name)
 
-    fluidez_path = UPLOAD_DIR / Path(fluidez_name).name
-    decod_path = UPLOAD_DIR / Path(decod_name).name
+    uid = uuid.uuid4().hex[:8]
+    fluidez_path = UPLOAD_DIR / f"{uid}_fluidez.wav"
+    decod_path = UPLOAD_DIR / f"{uid}_decod.wav"
 
-    with open(fluidez_path, "wb") as buffer:
-        shutil.copyfileobj(fluidez_file.file, buffer)
+    try:
+        await guardar_upload(fluidez_file, fluidez_path)
+        await guardar_upload(decod_file, decod_path)
 
-    with open(decod_path, "wb") as buffer:
-        shutil.copyfileobj(decod_file.file, buffer)
+        metricas_f = analizar_audio(fluidez_path)
+        metricas_d = analizar_audio(decod_path)
 
-    metricas_f = analizar_audio(fluidez_path)
-    metricas_d = analizar_audio(decod_path)
+        fluidez_index = calcular_indice_fluidez(metricas_f)
+        decod_index = calcular_indice_decodificacion(metricas_d)
 
-    fluidez_index = calcular_indice_fluidez(metricas_f)
-    decod_index = calcular_indice_decodificacion(metricas_d)
+        nivel_f = clasificar(fluidez_index)
+        nivel_d = clasificar(decod_index)
 
-    nivel_f = clasificar(fluidez_index)
-    nivel_d = clasificar(decod_index)
+        perfil = perfil_integrado(nivel_f, nivel_d)
+        problema = tipo_problema(nivel_f, nivel_d)
+        estado = estado_lectura(nivel_f, nivel_d)
+        interpretacion = interpretar_resultado(nivel_f, nivel_d)
+        sugerencia = sugerencia_pedagogica(nivel_f, nivel_d)
+        conclusion = conclusion_principal(nivel_f, nivel_d)
+        desc_fluidez = descripcion_fluidez(nivel_f)
+        desc_decod = descripcion_decodificacion(nivel_d)
+        fortalezas, alertas = fortalezas_alertas(nivel_f, nivel_d)
 
-    perfil = perfil_integrado(nivel_f, nivel_d)
-    problema = tipo_problema(nivel_f, nivel_d)
-    estado = estado_lectura(nivel_f, nivel_d)
-    interpretacion = interpretar_resultado(nivel_f, nivel_d)
-    sugerencia = sugerencia_pedagogica(nivel_f, nivel_d)
-    conclusion = conclusion_principal(nivel_f, nivel_d)
-    desc_fluidez = descripcion_fluidez(nivel_f)
-    desc_decod = descripcion_decodificacion(nivel_d)
-    fortalezas, alertas = fortalezas_alertas(nivel_f, nivel_d)
-
-    fluidez_path.unlink(missing_ok=True)
-    decod_path.unlink(missing_ok=True)
-
-    fluidez_name_safe = html.escape(fluidez_name)
-    decod_name_safe = html.escape(decod_name)
+    except HTTPException as e:
+        return render_error(e.detail)
+    except Exception as e:
+        return render_error(f"Error interno al analizar los audios: {str(e)}")
+    finally:
+        if fluidez_path.exists():
+            os.remove(fluidez_path)
+        if decod_path.exists():
+            os.remove(decod_path)
 
     fortalezas_html = "".join(f"<li>{html.escape(x)}</li>" for x in fortalezas)
     alertas_html = "".join(f"<li>{html.escape(x)}</li>" for x in alertas)
 
-    resultado_html = f"""
+    return f"""
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -511,7 +588,7 @@ async def evaluar(
         <div class="grid">
             <div class="box">
                 <h2>Fluidez</h2>
-                <p><strong>Archivo:</strong> {fluidez_name_safe}</p>
+                <p><strong>Archivo:</strong> {html.escape(fluidez_name)}</p>
                 <p><strong>Índice:</strong> {fluidez_index}</p>
                 <p><strong>Nivel:</strong> <span class="badge" style="background:{badge_color(nivel_f)};">{nivel_f}</span></p>
                 <p><strong>¿Qué significa?</strong> {html.escape(desc_fluidez)}</p>
@@ -519,12 +596,13 @@ async def evaluar(
                     <div><strong>Duración:</strong> {round(metricas_f["duracion"], 2)} s</div>
                     <div><strong>Silencio:</strong> {round(metricas_f["silencio"], 3)}</div>
                     <div><strong>Energía:</strong> {round(metricas_f["energia"], 4)}</div>
+                    <div><strong>ZCR:</strong> {round(metricas_f["zcr"], 4)}</div>
                 </div>
             </div>
 
             <div class="box">
                 <h2>Decodificación</h2>
-                <p><strong>Archivo:</strong> {decod_name_safe}</p>
+                <p><strong>Archivo:</strong> {html.escape(decod_name)}</p>
                 <p><strong>Índice:</strong> {decod_index}</p>
                 <p><strong>Nivel:</strong> <span class="badge" style="background:{badge_color(nivel_d)};">{nivel_d}</span></p>
                 <p><strong>¿Qué significa?</strong> {html.escape(desc_decod)}</p>
@@ -532,6 +610,7 @@ async def evaluar(
                     <div><strong>Duración:</strong> {round(metricas_d["duracion"], 2)} s</div>
                     <div><strong>Silencio:</strong> {round(metricas_d["silencio"], 3)}</div>
                     <div><strong>Energía:</strong> {round(metricas_d["energia"], 4)}</div>
+                    <div><strong>ZCR:</strong> {round(metricas_d["zcr"], 4)}</div>
                 </div>
             </div>
         </div>
@@ -560,15 +639,8 @@ async def evaluar(
             <p>{html.escape(sugerencia)}</p>
         </div>
 
-        <div class="section">
-            <h3>Definiciones simples</h3>
-            <p><strong>Fluidez:</strong> capacidad de leer con ritmo, continuidad y cierta naturalidad.</p>
-            <p><strong>Decodificación:</strong> capacidad de reconocer correctamente las palabras escritas.</p>
-        </div>
-
         <a href="/">Evaluar otro estudiante</a>
     </div>
 </body>
 </html>
 """
-    return resultado_html
