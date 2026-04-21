@@ -97,7 +97,7 @@ DECOD_REFERENCIA = {
 # MODELO DE TRANSCRIPCIÓN
 # =========================
 
-WHISPER_MODEL_NAME = "small"
+WHISPER_MODEL_NAME = "tiny"
 _whisper_model: WhisperModel | None = None
 
 
