@@ -4,5 +4,3 @@ python-multipart
 numpy
 librosa
 soundfile
-faster-whisper
-rapidfuzz
