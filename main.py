@@ -993,34 +993,34 @@ async def evaluar(
             border-radius: 10px;
             margin-top: 14px;
         }}
-        .dimension-card {
+        .dimension-card {{
             border: 1px solid #e5e7eb;
             border-radius: 12px;
             padding: 16px;
             background: #ffffff;
-        }
-        .dim-head {
+        }}
+        .dim-head {{
             display: flex;
             justify-content: space-between;
             align-items: center;
             gap: 12px;
             margin-bottom: 8px;
-        }
-        .dim-detail {
+        }}
+        .dim-detail {{
             font-size: 13px;
             color: #475569;
             background: #f8fafc;
             border-radius: 8px;
             padding: 8px;
             margin-top: 8px;
-        }
-        .summary-box {
+        }}
+        .summary-box {{
             background: #eef2ff;
             border: 1px solid #c7d2fe;
             border-radius: 14px;
             padding: 18px;
             margin-top: 18px;
-        }
+        }}
         table {{
             width: 100%;
             border-collapse: collapse;
