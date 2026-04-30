@@ -172,11 +172,11 @@ def contar_repeticiones_adjacentes(tokens: list[str]) -> int:
 
 def badge_color(nivel: str | None):
     if nivel == "ALTO":
-        return "#d1fae5"
+        return "#bbf7d0"
     if nivel == "MEDIO":
-        return "#fef3c7"
+        return "#fde68a"
     if nivel == "BAJO":
-        return "#fee2e2"
+        return "#fecaca"
     return "#e5e7eb"
 
 
@@ -544,17 +544,17 @@ def alinear_decod(expected_items: list[dict[str, Any]], transcripcion: str) -> d
 
 def conclusion_fluidez(nivel: str) -> str:
     if nivel == "ALTO":
-        return "Se observa una lectura continua, con buen ajuste temporal y lingüístico."
+        return "Se observa una lectura continua, con buen ajuste temporal y adecuada correspondencia con el texto."
     if nivel == "MEDIO":
-        return "La lectura muestra un desempeño intermedio, con continuidad parcial y margen de mejora."
-    return "Se observan dificultades de continuidad y/o ajuste lingüístico en la lectura."
+        return "La lectura muestra un desempeño intermedio, con continuidad parcial y aspectos que aún pueden consolidarse."
+    return "Se observan dificultades en continuidad, ritmo o correspondencia con el texto leído."
 
 def conclusion_decod(nivel: str) -> str:
     if nivel == "ALTO":
-        return "La decodificación aparece bien lograda en este tamizaje."
+        return "La decodificación aparece fortalecida en esta tarea de tamizaje."
     if nivel == "MEDIO":
-        return "La decodificación se ubica en una zona intermedia."
-    return "La decodificación muestra debilidades relevantes en este tamizaje."
+        return "La decodificación se ubica en una zona intermedia, con habilidades parcialmente consolidadas."
+    return "La decodificación muestra debilidades relevantes que conviene revisar con apoyo específico."
 
 def fortalezas_fluidez(score_temp: float, score_ling: float) -> list[str]:
     out = []
@@ -579,7 +579,7 @@ def alertas_fluidez(score_temp: float, score_ling: float) -> list[str]:
 def fortalezas_decod(acc_reales: float, acc_pseudos: float) -> list[str]:
     out = []
     if acc_reales >= 0.72:
-        out.append("Buen reconocimiento de palabras reales.")
+        out.append("Buen desempeño en lectura de palabras reales.")
     if acc_pseudos >= 0.72:
         out.append("Buen desempeño en pseudopalabras.")
     if not out:
@@ -608,35 +608,35 @@ def nivel_dimension(score: float) -> str:
 
 def explicacion_dimension(nombre: str, nivel: str) -> str:
     textos = {
-        "Ritmo lector": {
-            "ALTO": "El ritmo de lectura aparece estable y adecuado para la tarea.",
-            "MEDIO": "El ritmo de lectura es parcialmente adecuado, con algunos cortes o variaciones.",
-            "BAJO": "El ritmo de lectura muestra dificultades relevantes de continuidad temporal.",
+        "Ritmo de lectura": {
+            "ALTO": "El ritmo de lectura aparece estable y adecuado para la tarea aplicada.",
+            "MEDIO": "El ritmo de lectura se ubica en un rango intermedio, con algunos cortes o variaciones.",
+            "BAJO": "El ritmo de lectura muestra dificultades relevantes en continuidad, pausas o velocidad de ejecución.",
         },
-        "Continuidad de la lectura": {
-            "ALTO": "La lectura se mantiene relativamente continua, con pausas esperables.",
-            "MEDIO": "La lectura presenta continuidad parcial, con pausas o fragmentaciones moderadas.",
-            "BAJO": "La lectura aparece muy fragmentada o con interrupciones frecuentes.",
+        "Fluidez continua": {
+            "ALTO": "La lectura se mantiene continua, con pausas esperables para la tarea.",
+            "MEDIO": "La lectura presenta continuidad parcial, con pausas o fragmentaciones que conviene monitorear.",
+            "BAJO": "La lectura aparece fragmentada, con interrupciones frecuentes o segmentos breves de producción.",
         },
-        "Ajuste al texto": {
-            "ALTO": "La producción coincide ampliamente con el texto esperado.",
-            "MEDIO": "La producción mantiene parte importante del texto, aunque con omisiones o desajustes.",
-            "BAJO": "La producción se aleja de manera importante del texto esperado.",
+        "Fidelidad al texto leído": {
+            "ALTO": "La lectura mantiene alta correspondencia con el texto presentado, con pocas omisiones o desajustes relevantes.",
+            "MEDIO": "La lectura mantiene correspondencia parcial con el texto, aunque aparecen omisiones o desajustes.",
+            "BAJO": "La lectura se aleja de manera importante del texto presentado y requiere revisión específica.",
         },
-        "Precisión lectora": {
-            "ALTO": "Se observan pocos desajustes relevantes entre lo leído y lo esperado.",
-            "MEDIO": "Se observan algunos desajustes que conviene revisar.",
-            "BAJO": "Se observan desajustes importantes que requieren apoyo lector.",
+        "Exactitud lectora": {
+            "ALTO": "Se observan pocos desajustes relevantes entre la producción oral y el texto esperado.",
+            "MEDIO": "Se observan algunos desajustes de precisión que conviene revisar.",
+            "BAJO": "Se observan desajustes importantes que sugieren necesidad de apoyo lector.",
         },
-        "Palabras reales": {
-            "ALTO": "Buen reconocimiento de palabras reales.",
-            "MEDIO": "Reconocimiento intermedio de palabras reales.",
-            "BAJO": "Dificultades relevantes en el reconocimiento de palabras reales.",
+        "Lectura de palabras": {
+            "ALTO": "Buen desempeño en lectura de palabras reales.",
+            "MEDIO": "Desempeño intermedio en lectura de palabras reales.",
+            "BAJO": "Dificultades relevantes en lectura de palabras reales.",
         },
-        "Pseudopalabras": {
-            "ALTO": "Buen desempeño en lectura de pseudopalabras.",
-            "MEDIO": "Desempeño intermedio en pseudopalabras.",
-            "BAJO": "Dificultades relevantes en lectura de pseudopalabras.",
+        "Lectura de pseudopalabras": {
+            "ALTO": "Buen desempeño en lectura de pseudopalabras, indicador relevante de decodificación.",
+            "MEDIO": "Desempeño intermedio en lectura de pseudopalabras.",
+            "BAJO": "Dificultades relevantes en lectura de pseudopalabras, lo que sugiere revisar procesos de decodificación.",
         },
     }
     return textos.get(nombre, {}).get(nivel, "")
@@ -659,10 +659,25 @@ def render_dimension(nombre: str, score: float, detalle: str = "") -> str:
 
 def sintesis_general(nivel_fluidez: str, nivel_decod: str) -> str:
     if nivel_fluidez == "ALTO" and nivel_decod == "ALTO":
-        return "El desempeño lector global aparece fortalecido en las tareas aplicadas."
+        return "El desempeño lector general se ubica en un rango fortalecido para esta tarea, mostrando habilidades lectoras adecuadamente consolidadas."
+    if nivel_fluidez == "BAJO" and nivel_decod == "BAJO":
+        return "El desempeño lector general se ubica bajo lo esperado para esta tarea y sugiere la conveniencia de apoyo focalizado en habilidades lectoras iniciales."
     if nivel_fluidez == "BAJO" or nivel_decod == "BAJO":
-        return "El desempeño lector global sugiere necesidad de apoyo y seguimiento."
-    return "El desempeño lector global se ubica en una zona intermedia, con fortalezas y aspectos por consolidar."
+        return "El perfil lector muestra una dimensión descendida que conviene revisar mediante apoyo específico y seguimiento."
+    return "El desempeño lector general se ubica en un rango intermedio, con habilidades parcialmente consolidadas y aspectos aún en desarrollo."
+
+
+
+def recomendacion_general(nivel_fluidez: str, nivel_decod: str) -> str:
+    if nivel_fluidez == "ALTO" and nivel_decod == "ALTO":
+        return "Se recomienda mantener experiencias frecuentes de lectura oral y monitorear periódicamente el progreso."
+    if nivel_fluidez == "ALTO" and nivel_decod == "BAJO":
+        return "Se recomienda reforzar precisión en lectura de palabras y pseudopalabras, manteniendo actividades de lectura oral continua."
+    if nivel_fluidez == "BAJO" and nivel_decod == "ALTO":
+        return "Se recomienda trabajar velocidad, continuidad y expresividad lectora, sin descuidar la precisión ya observada."
+    if nivel_fluidez == "BAJO" and nivel_decod == "BAJO":
+        return "Se recomienda apoyo focalizado en habilidades lectoras iniciales, combinando trabajo de decodificación y práctica de lectura guiada."
+    return "Se recomienda continuar monitoreando el desempeño lector y reforzar las dimensiones que aparecen en rango intermedio o bajo."
 
 
 # =========================
@@ -765,7 +780,7 @@ def home():
             <div class="brand-mark">F</div>
             <div class="brand-text">
                 <h1>Fluidez</h1>
-                <p>by ComunicaLab</p>
+                <p>by ComunicaLab · Beta 1.0 prevalidación</p>
             </div>
         </div>
 
@@ -1053,7 +1068,7 @@ async def evaluar(
 <body>
     <div class="card">
         <div class="hero">
-            <h1>Resultado de evaluación</h1>
+            <h1>Resultado de evaluación lectora</h1>
             <p><strong>ID o nombre:</strong> {student_id_safe} | <strong>Forma:</strong> {forma_safe}</p>
             <p class="meta"><strong>Fluidez:</strong> <span class="badge" style="background:{badge_color(nivel_fluidez)};">{nivel_fluidez}</span> |
             <strong>Decodificación:</strong> <span class="badge" style="background:{badge_color(nivel_decod)};">{nivel_decod}</span></p>
@@ -1063,6 +1078,7 @@ async def evaluar(
             <h2>Síntesis general</h2>
             <p><strong>Resultado global:</strong> {html.escape(sintesis_general(nivel_fluidez, nivel_decod))}</p>
             <p class="meta">La interpretación combina desempeño en fluidez lectora y decodificación.</p>
+            <p><strong>Orientación general:</strong> {html.escape(recomendacion_general(nivel_fluidez, nivel_decod))}</p>
         </div>
 
         <div class="grid">
@@ -1091,49 +1107,49 @@ async def evaluar(
         <div class="section">
             <h2>Dimensiones del desempeño lector</h2>
             <div class="grid">
-                {render_dimension("Ritmo lector", dim_ritmo, f"Duración: {round(met_f['duracion_s'], 2)} s | Pausas/min: {round(met_f['pausas_por_min'], 2)}")}
-                {render_dimension("Continuidad de la lectura", dim_continuidad, f"Segmento medio de voz: {round(met_f['voz_segmento_medio_s'], 3)} s | Pausa media: {round(met_f['pausa_media_s'], 3)} s")}
-                {render_dimension("Ajuste al texto", dim_ajuste_texto, f"Cobertura textual: {flu_ling['cobertura']} | Omisiones aprox.: {flu_ling['omisiones_aprox']}")}
-                {render_dimension("Precisión lectora", dim_precision, f"Precisión de ajuste: {flu_ling['precision_ajuste']} | Repeticiones: {flu_ling['repeticiones_adjacentes']}")}
-                {render_dimension("Palabras reales", dim_palabras_reales, f"Exactitud en palabras reales: {decod['acc_reales']}")}
-                {render_dimension("Pseudopalabras", dim_pseudopalabras, f"Exactitud en pseudopalabras: {decod['acc_pseudos']}")}
+                {render_dimension("Ritmo de lectura", dim_ritmo, f"Duración: {round(met_f['duracion_s'], 2)} s | Pausas/min: {round(met_f['pausas_por_min'], 2)}")}
+                {render_dimension("Fluidez continua", dim_continuidad, f"Segmento medio de voz: {round(met_f['voz_segmento_medio_s'], 3)} s | Pausa media: {round(met_f['pausa_media_s'], 3)} s")}
+                {render_dimension("Fidelidad al texto leído", dim_ajuste_texto, f"Cobertura textual: {flu_ling['cobertura']} | Omisiones aprox.: {flu_ling['omisiones_aprox']}")}
+                {render_dimension("Exactitud lectora", dim_precision, f"Precisión de ajuste: {flu_ling['precision_ajuste']} | Repeticiones: {flu_ling['repeticiones_adjacentes']}")}
+                {render_dimension("Lectura de palabras", dim_palabras_reales, f"Exactitud en palabras reales: {decod['acc_reales']}")}
+                {render_dimension("Lectura de pseudopalabras", dim_pseudopalabras, f"Exactitud en pseudopalabras: {decod['acc_pseudos']}")}
             </div>
         </div>
 
         <div class="two-cols">
             <div class="section">
-                <h3>Fortalezas en fluidez</h3>
+                <h3>Aspectos fortalecidos en fluidez</h3>
                 <ul>{fortalezas_f_html}</ul>
             </div>
             <div class="section">
-                <h3>Alertas en fluidez</h3>
+                <h3>Aspectos a reforzar en fluidez</h3>
                 <ul>{alertas_f_html}</ul>
             </div>
         </div>
 
         <div class="two-cols">
             <div class="section">
-                <h3>Fortalezas en decodificación</h3>
+                <h3>Aspectos fortalecidos en decodificación</h3>
                 <ul>{fortalezas_d_html}</ul>
             </div>
             <div class="section">
-                <h3>Alertas en decodificación</h3>
+                <h3>Aspectos a reforzar en decodificación</h3>
                 <ul>{alertas_d_html}</ul>
             </div>
         </div>
 
         <div class="section">
-            <h3>Transcripción de fluidez</h3>
+            <h3>Transcripción asociada a fluidez</h3>
             <div class="mono">{html.escape(txt_f)}</div>
         </div>
 
         <div class="section">
-            <h3>Transcripción de decodificación</h3>
+            <h3>Transcripción asociada a decodificación</h3>
             <div class="mono">{html.escape(txt_d)}</div>
         </div>
 
         <div class="section">
-            <h3>Detalle técnico de decodificación</h3>
+            <h3>Detalle técnico de la tarea de decodificación</h3>
             <table>
                 <thead>
                     <tr>
@@ -1154,9 +1170,10 @@ async def evaluar(
         <div class="section">
             <h3>Nota técnica</h3>
             <p>
-                La fluidez se calcula como un índice híbrido:
-                <strong>45% temporal</strong> y <strong>55% lingüístico</strong>.
-                La decodificación se calcula comparando la transcripción con la lista esperada de palabras y pseudopalabras de la forma seleccionada.
+                La fluidez se calcula mediante un índice híbrido que integra información temporal
+                (<strong>45%</strong>) y lingüística (<strong>55%</strong>).
+                La decodificación se estima comparando la transcripción automática con la lista esperada de palabras y pseudopalabras de la forma seleccionada.
+                Esta versión corresponde a una beta prevalidación y sus resultados deben interpretarse como apoyo inicial para análisis educativo.
             </p>
         </div>
 
