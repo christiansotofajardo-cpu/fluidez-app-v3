@@ -597,6 +597,74 @@ def alertas_decod(acc_reales: float, acc_pseudos: float) -> list[str]:
     return out
 
 
+
+# =========================
+# DIMENSIONES COMPRENSIBLES PARA REPORTE
+# =========================
+
+def nivel_dimension(score: float) -> str:
+    return clasificar_nivel(score)
+
+
+def explicacion_dimension(nombre: str, nivel: str) -> str:
+    textos = {
+        "Ritmo lector": {
+            "ALTO": "El ritmo de lectura aparece estable y adecuado para la tarea.",
+            "MEDIO": "El ritmo de lectura es parcialmente adecuado, con algunos cortes o variaciones.",
+            "BAJO": "El ritmo de lectura muestra dificultades relevantes de continuidad temporal.",
+        },
+        "Continuidad de la lectura": {
+            "ALTO": "La lectura se mantiene relativamente continua, con pausas esperables.",
+            "MEDIO": "La lectura presenta continuidad parcial, con pausas o fragmentaciones moderadas.",
+            "BAJO": "La lectura aparece muy fragmentada o con interrupciones frecuentes.",
+        },
+        "Ajuste al texto": {
+            "ALTO": "La producción coincide ampliamente con el texto esperado.",
+            "MEDIO": "La producción mantiene parte importante del texto, aunque con omisiones o desajustes.",
+            "BAJO": "La producción se aleja de manera importante del texto esperado.",
+        },
+        "Precisión lectora": {
+            "ALTO": "Se observan pocos desajustes relevantes entre lo leído y lo esperado.",
+            "MEDIO": "Se observan algunos desajustes que conviene revisar.",
+            "BAJO": "Se observan desajustes importantes que requieren apoyo lector.",
+        },
+        "Palabras reales": {
+            "ALTO": "Buen reconocimiento de palabras reales.",
+            "MEDIO": "Reconocimiento intermedio de palabras reales.",
+            "BAJO": "Dificultades relevantes en el reconocimiento de palabras reales.",
+        },
+        "Pseudopalabras": {
+            "ALTO": "Buen desempeño en lectura de pseudopalabras.",
+            "MEDIO": "Desempeño intermedio en pseudopalabras.",
+            "BAJO": "Dificultades relevantes en lectura de pseudopalabras.",
+        },
+    }
+    return textos.get(nombre, {}).get(nivel, "")
+
+
+def render_dimension(nombre: str, score: float, detalle: str = "") -> str:
+    nivel = nivel_dimension(score)
+    detalle_html = f"<div class='dim-detail'>{html.escape(detalle)}</div>" if detalle else ""
+    return f"""
+    <div class="dimension-card">
+        <div class="dim-head">
+            <strong>{html.escape(nombre)}</strong>
+            <span class="badge" style="background:{badge_color(nivel)};">{nivel}</span>
+        </div>
+        <p>{html.escape(explicacion_dimension(nombre, nivel))}</p>
+        {detalle_html}
+    </div>
+    """
+
+
+def sintesis_general(nivel_fluidez: str, nivel_decod: str) -> str:
+    if nivel_fluidez == "ALTO" and nivel_decod == "ALTO":
+        return "El desempeño lector global aparece fortalecido en las tareas aplicadas."
+    if nivel_fluidez == "BAJO" or nivel_decod == "BAJO":
+        return "El desempeño lector global sugiere necesidad de apoyo y seguimiento."
+    return "El desempeño lector global se ubica en una zona intermedia, con fortalezas y aspectos por consolidar."
+
+
 # =========================
 # HOME
 # =========================
@@ -701,12 +769,12 @@ def home():
             </div>
         </div>
 
-        <p>Sube un audio de fluidez y uno de decodificación para obtener una evaluación lectora integrada.</p>
+        <p>Sube un audio de fluidez y uno de decodificación para obtener un reporte lector integrado y comprensible.</p>
 
         <div class="demo">
-            Esta versión usa un análisis híbrido:
-            <strong>temporal + lingüístico</strong> para fluidez, y
-            <strong>comparación con lista esperada</strong> para decodificación.
+            Esta versión entrega dimensiones interpretables:
+            <strong>ritmo lector, continuidad, ajuste al texto, precisión lectora</strong>
+            y <strong>decodificación de palabras y pseudopalabras</strong>.
             <br><br>
             Formato admitido en esta versión: <strong>.wav</strong>
         </div>
@@ -793,6 +861,18 @@ async def evaluar(
         alertas_f = alertas_fluidez(score_temp, score_ling)
         fortalezas_d = fortalezas_decod(decod["acc_reales"], decod["acc_pseudos"])
         alertas_d = alertas_decod(decod["acc_reales"], decod["acc_pseudos"])
+
+        # Dimensiones comprensibles para usuarios
+        dim_ritmo = score_temp
+        dim_continuidad = clamp(
+            0.50 * met_f["speech_ratio"]
+            + 0.25 * clamp(met_f["voz_segmento_medio_s"] / 1.2)
+            + 0.25 * (1.0 - clamp(met_f["pausa_media_s"] / 1.2))
+        )
+        dim_ajuste_texto = flu_ling["cobertura"]
+        dim_precision = flu_ling["precision_ajuste"]
+        dim_palabras_reales = decod["acc_reales"]
+        dim_pseudopalabras = decod["acc_pseudos"]
 
     except HTTPException as e:
         return render_error(e.detail)
@@ -913,6 +993,34 @@ async def evaluar(
             border-radius: 10px;
             margin-top: 14px;
         }}
+        .dimension-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 16px;
+            background: #ffffff;
+        }
+        .dim-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+        .dim-detail {
+            font-size: 13px;
+            color: #475569;
+            background: #f8fafc;
+            border-radius: 8px;
+            padding: 8px;
+            margin-top: 8px;
+        }
+        .summary-box {
+            background: #eef2ff;
+            border: 1px solid #c7d2fe;
+            border-radius: 14px;
+            padding: 18px;
+            margin-top: 18px;
+        }
         table {{
             width: 100%;
             border-collapse: collapse;
@@ -951,37 +1059,44 @@ async def evaluar(
             <strong>Decodificación:</strong> <span class="badge" style="background:{badge_color(nivel_decod)};">{nivel_decod}</span></p>
         </div>
 
+        <div class="summary-box">
+            <h2>Síntesis general</h2>
+            <p><strong>Resultado global:</strong> {html.escape(sintesis_general(nivel_fluidez, nivel_decod))}</p>
+            <p class="meta">La interpretación combina desempeño en fluidez lectora y decodificación.</p>
+        </div>
+
         <div class="grid">
             <div class="box">
-                <h2>Fluidez híbrida</h2>
-                <p><strong>Puntaje total:</strong> {score_fluidez}</p>
-                <p><strong>Componente temporal:</strong> {round(score_temp, 4)}</p>
-                <p><strong>Componente lingüístico:</strong> {round(score_ling, 4)}</p>
-                <p><strong>Conclusión:</strong> {html.escape(conclusion_fluidez(nivel_fluidez))}</p>
+                <h2>Fluidez lectora</h2>
+                <p><strong>Nivel:</strong> <span class="badge" style="background:{badge_color(nivel_fluidez)};">{nivel_fluidez}</span></p>
+                <p><strong>Interpretación:</strong> {html.escape(conclusion_fluidez(nivel_fluidez))}</p>
                 <div class="metrics">
-                    <div><strong>Duración:</strong> {round(met_f["duracion_s"], 2)} s</div>
-                    <div><strong>Speech ratio:</strong> {round(met_f["speech_ratio"], 3)}</div>
-                    <div><strong>Voz segmento medio:</strong> {round(met_f["voz_segmento_medio_s"], 3)} s</div>
-                    <div><strong>Pausa media:</strong> {round(met_f["pausa_media_s"], 3)} s</div>
-                    <div><strong>Pausas/min:</strong> {round(met_f["pausas_por_min"], 2)}</div>
-                    <div><strong>Pausas largas ratio:</strong> {round(met_f["pausas_largas_ratio"], 3)}</div>
-                    <div><strong>Cobertura textual:</strong> {flu_ling["cobertura"]}</div>
-                    <div><strong>Precisión de ajuste:</strong> {flu_ling["precision_ajuste"]}</div>
-                    <div><strong>Omisiones aprox:</strong> {flu_ling["omisiones_aprox"]}</div>
-                    <div><strong>Repeticiones adyacentes:</strong> {flu_ling["repeticiones_adjacentes"]}</div>
+                    <div><strong>Puntaje interno:</strong> {score_fluidez}</div>
+                    <div><strong>Base temporal:</strong> {round(score_temp, 4)}</div>
+                    <div><strong>Base lingüística:</strong> {round(score_ling, 4)}</div>
                 </div>
             </div>
 
             <div class="box">
                 <h2>Decodificación</h2>
-                <p><strong>Puntaje total:</strong> {score_decod}</p>
-                <p><strong>Exactitud total:</strong> {decod["acc_total"]}</p>
-                <p><strong>Palabras reales:</strong> {decod["acc_reales"]}</p>
-                <p><strong>Pseudopalabras:</strong> {decod["acc_pseudos"]}</p>
-                <p><strong>Conclusión:</strong> {html.escape(conclusion_decod(nivel_decod))}</p>
+                <p><strong>Nivel:</strong> <span class="badge" style="background:{badge_color(nivel_decod)};">{nivel_decod}</span></p>
+                <p><strong>Interpretación:</strong> {html.escape(conclusion_decod(nivel_decod))}</p>
                 <div class="metrics">
+                    <div><strong>Puntaje interno:</strong> {score_decod}</div>
                     <div><strong>Items correctos:</strong> {decod["correctos_total"]} / {decod["total_items"]}</div>
                 </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Dimensiones del desempeño lector</h2>
+            <div class="grid">
+                {render_dimension("Ritmo lector", dim_ritmo, f"Duración: {round(met_f['duracion_s'], 2)} s | Pausas/min: {round(met_f['pausas_por_min'], 2)}")}
+                {render_dimension("Continuidad de la lectura", dim_continuidad, f"Segmento medio de voz: {round(met_f['voz_segmento_medio_s'], 3)} s | Pausa media: {round(met_f['pausa_media_s'], 3)} s")}
+                {render_dimension("Ajuste al texto", dim_ajuste_texto, f"Cobertura textual: {flu_ling['cobertura']} | Omisiones aprox.: {flu_ling['omisiones_aprox']}")}
+                {render_dimension("Precisión lectora", dim_precision, f"Precisión de ajuste: {flu_ling['precision_ajuste']} | Repeticiones: {flu_ling['repeticiones_adjacentes']}")}
+                {render_dimension("Palabras reales", dim_palabras_reales, f"Exactitud en palabras reales: {decod['acc_reales']}")}
+                {render_dimension("Pseudopalabras", dim_pseudopalabras, f"Exactitud en pseudopalabras: {decod['acc_pseudos']}")}
             </div>
         </div>
 
@@ -1018,7 +1133,7 @@ async def evaluar(
         </div>
 
         <div class="section">
-            <h3>Detalle de decodificación</h3>
+            <h3>Detalle técnico de decodificación</h3>
             <table>
                 <thead>
                     <tr>
@@ -1037,7 +1152,7 @@ async def evaluar(
         </div>
 
         <div class="section">
-            <h3>Nota metodológica</h3>
+            <h3>Nota técnica</h3>
             <p>
                 La fluidez se calcula como un índice híbrido:
                 <strong>45% temporal</strong> y <strong>55% lingüístico</strong>.
