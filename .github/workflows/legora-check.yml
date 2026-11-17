@@ -1,5 +1,5 @@
 
-name: LEGORA - Verificacion Python 3.11
+name: LEGORA - Verificacion Bilingue
 
 on:
   push:
@@ -10,6 +10,7 @@ on:
 jobs:
   verificar:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Descargar codigo
@@ -18,10 +19,39 @@ jobs:
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.11.9'
 
       - name: Comprobar sintaxis
         run: |
-          python --version
           python -m py_compile main.py
-          echo "LEGORA: sintaxis correcta"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip check
+
+      - name: Probar motor bilingue
+        run: |
+          python - <<'PY'
+          import main
+
+          assert main.WHISPER_MODEL_NAME == "tiny"
+
+          for idioma in ("es", "en"):
+              assert idioma in main.TEXTOS_REFERENCIA
+              assert idioma in main.DECOD_REFERENCIA
+
+              for forma in ("2A", "2B"):
+                  assert main.TEXTOS_REFERENCIA[idioma][forma]
+                  assert len(main.DECOD_REFERENCIA[idioma][forma]) == 16
+
+                  resultado = main.home(lang=idioma, forma=forma)
+                  assert resultado.status_code == 200
+
+              print(f"LEGORA {idioma.upper()}: OK")
+
+          assert main.get_whisper_model is not None
+
+          print("PRUEBA BILINGUE BASICA APROBADA")
+          PY
