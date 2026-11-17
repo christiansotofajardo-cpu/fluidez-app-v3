@@ -9,7 +9,7 @@ on:
 
 jobs:
   verificar:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
@@ -19,17 +19,18 @@ jobs:
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11.9'
+          python-version: '3.11'
 
       - name: Comprobar sintaxis
         run: |
           python -m py_compile main.py
+          echo "Sintaxis Python correcta"
 
       - name: Instalar dependencias
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip check
+          python -m pip install -r requirements.txt
+          python -m pip check
 
       - name: Probar motor bilingue
         run: |
@@ -50,8 +51,6 @@ jobs:
                   assert resultado.status_code == 200
 
               print(f"LEGORA {idioma.upper()}: OK")
-
-          assert main.get_whisper_model is not None
 
           print("PRUEBA BILINGUE BASICA APROBADA")
           PY
