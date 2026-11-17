@@ -1,0 +1,27 @@
+
+name: LEGORA - Verificacion Python 3.11
+
+on:
+  push:
+    branches:
+      - feature/legora-mozilla-bilingue
+  workflow_dispatch:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Comprobar sintaxis
+        run: |
+          python --version
+          python -m py_compile main.py
+          echo "LEGORA: sintaxis correcta"
