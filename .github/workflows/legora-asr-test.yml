@@ -2,6 +2,13 @@
 name: LEGORA - Prueba de Voz ES EN
 
 on:
+  push:
+    branches:
+      - feature/legora-mozilla-bilingue
+    paths:
+      - ".github/workflows/legora-asr-test.yml"
+      - "main.py"
+      - "requirements.txt"
   workflow_dispatch:
 
 permissions:
