@@ -1,0 +1,121 @@
+
+name: LEGORA - Prueba de Voz ES EN
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probar-voz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Descargar codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar sintetizador y dependencias
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y espeak-ng
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+
+      - name: Probar Whisper Tiny y evaluacion ES EN
+        run: |
+          python - <<'PY'
+          import asyncio
+          import subprocess
+          from io import BytesIO
+          from pathlib import Path
+
+          from starlette.datastructures import UploadFile
+          import main
+
+          assert main.WHISPER_MODEL_NAME == "tiny"
+
+          casos = {
+              "es": (
+                  "El duende vivia en un bosque muy antiguo. "
+                  "Todas las mananas caminaba entre los arboles. "
+                  "Le gustaba escuchar los sonidos de los pajaros."
+              ),
+              "en": (
+                  "A small fox lived near a quiet forest. "
+                  "Every morning it walked beside the stream. "
+                  "It liked to listen to the birds."
+              ),
+          }
+
+          for idioma, texto in casos.items():
+              archivo = Path(f"/tmp/legora_{idioma}.wav")
+
+              subprocess.run(
+                  [
+                      "espeak-ng",
+                      "-v", idioma,
+                      "-s", "125",
+                      "-w", str(archivo),
+                      texto,
+                  ],
+                  check=True,
+              )
+
+              assert archivo.exists()
+              assert archivo.stat().st_size > 1000
+
+              print(f"\nPROBANDO IDIOMA: {idioma.upper()}")
+
+              transcripcion = main.transcribir_audio(
+                  archivo, idioma
+              )
+
+              print("Transcripcion:", transcripcion)
+
+              assert transcripcion.strip(), (
+                  f"Whisper no produjo texto en {idioma}"
+              )
+
+              metricas = main.analizar_audio_temporal(
+                  archivo
+              )
+              assert metricas["duracion_s"] > 0
+
+              def crear_upload():
+                  return UploadFile(
+                      filename=f"prueba_{idioma}.wav",
+                      file=BytesIO(archivo.read_bytes()),
+                  )
+
+              resultado = asyncio.run(
+                  main.evaluar(
+                      student_id="DEMO001",
+                      idioma=idioma,
+                      forma="2A",
+                      fluidez_file=crear_upload(),
+                      decod_file=crear_upload(),
+                  )
+              )
+
+              assert resultado.status_code == 200
+
+              contenido = resultado.body.decode("utf-8")
+
+              assert "LÉGORA" in contenido
+              assert "DEMO001" in contenido
+
+              print(
+                  f"LEGORA {idioma.upper()}: "
+                  "INFERENCIA Y EVALUACION OK"
+              )
+
+          print("\nPRUEBA TECNICA ES/EN APROBADA")
+          PY
