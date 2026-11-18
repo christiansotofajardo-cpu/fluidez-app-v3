@@ -1,8 +1,10 @@
+
 fastapi
 uvicorn[standard]
 python-multipart
 numpy
 librosa
 soundfile
-faster-whisper
+faster-whisper==1.2.1
+av==18.1.0
 rapidfuzz
